@@ -1,6 +1,6 @@
 # lockedin
 
-A new Flutter project.
+A new Flutter project with Jay and Jeevan
 
 ## Getting Started
 
