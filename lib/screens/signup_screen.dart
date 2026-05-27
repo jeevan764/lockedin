@@ -1,5 +1,6 @@
 // lib/screens/signup_screen.dart
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // 1. Imported Supabase
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -42,7 +43,7 @@ class _SignupScreenState extends State<SignupScreen> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 30.0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                cross Levant: CrossAxisAlignment.start,
                 children: [
                   // Back Button Custom Positioning
                   const SizedBox(height: 10),
@@ -109,15 +110,56 @@ class _SignupScreenState extends State<SignupScreen> {
                   
                   const SizedBox(height: 30),
 
-                  // Primary Sign Up Button
+                  // Primary Sign Up Button Connected to Supabase
                   SizedBox(
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton(
-                      onPressed: () {
-                        // Handle standard credential signup logic here
-                        print('Username: ${_usernameController.text}');
-                        print('Password: ${_passwordController.text}');
+                      onPressed: () async {
+                        // 2. Extract and clean up the input strings
+                        final username = _usernameController.text.trim();
+                        final password = _passwordController.text.trim();
+
+                        // Simple validation check
+                        if (username.isEmpty || password.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please fill in all fields'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                          return;
+                        }
+
+                        try {
+                          // 3. Send credentials to Supabase Auth
+                          // Because Supabase handles registration via email setups, we append a mock domain
+                          await Supabase.instance.client.auth.signUp(
+                            email: '$username@lockedin.com',
+                            password: password,
+                          );
+
+                          // 4. Alert user and slide back to the previous screen on complete success
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Sign up successful! Check your database.'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                            Navigator.pop(context); // Takes them back to Welcome Screen
+                          }
+                        } catch (error) {
+                          // 5. Catch network failures or account duplicated issues safely
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error: ${error.toString()}'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
@@ -156,7 +198,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     height: 54,
                     child: OutlinedButton(
                       onPressed: () {
-                        // Handle Google authentication logic here
+                        // TODO: Handle Google authentication logic here
                       },
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Colors.white, width: 1.5),
@@ -167,7 +209,6 @@ class _SignupScreenState extends State<SignupScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Using a clean layout approach instead of asset image files to keep it simple
                           const Icon(Icons.g_mobiledata_rounded, color: Colors.white, size: 36),
                           const SizedBox(width: 4),
                           const Text(
