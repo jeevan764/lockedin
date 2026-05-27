@@ -1,5 +1,6 @@
 // lib/screens/welcome_screen.dart
 import 'package:flutter/material.dart';
+import 'signup_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -39,7 +40,7 @@ class WelcomeScreen extends StatelessWidget {
                       children: [
                         TextSpan(
                           text: 'Locked',
-                          style: TextStyle(color: Color(0xff295a92)),
+                          style: TextStyle(color: Color.fromARGB(255, 240, 241, 243)),
                         ),
                         TextSpan(
                           text: 'In',
@@ -94,6 +95,10 @@ class WelcomeScreen extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () {
                           // TODO: Navigate to Sign Up Screen
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const SignupScreen()),
+                            );
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
