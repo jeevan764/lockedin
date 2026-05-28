@@ -1,6 +1,6 @@
 // lib/screens/signup_screen.dart
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // 1. Imported Supabase
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -10,9 +10,9 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  // Controllers to capture the input text
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -21,10 +21,62 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
+  Future<void> _handleSignup() async {
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
+
+    // 1. Basic validation
+    if (username.isEmpty || password.isEmpty) {
+      _showSnackBar('Please fill in all fields', Colors.orange);
+      return;
+    }
+
+    if (password.length < 6) {
+      _showSnackBar('Password must be at least 6 characters', Colors.orange);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 2. Create the user inside Supabase Auth
+      final AuthResponse response = await Supabase.instance.client.auth.signUp(
+        email: '$username@lockedin.com', // Formats custom username as a dummy email
+        password: password,
+      );
+
+      final user = response.user;
+
+      if (user != null) {
+        // 3. Link the custom username into your public profiles table
+        await Supabase.instance.client.from('profiles').insert({
+          'id': user.id, // Maps directly to the secure Auth ID
+          'username': username,
+        });
+
+        if (mounted) {
+          _showSnackBar('Account created successfully!', Colors.green);
+          Navigator.pop(context); // Return to Welcome Screen
+        }
+      }
+    } on AuthException catch (error) {
+      _showSnackBar(error.message, Colors.red);
+    } catch (error) {
+      _showSnackBar('Database connection error occurred.', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showSnackBar(String message, Color backgroundColor) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: backgroundColor),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Using the same radial gradient background as the welcome screen
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -39,13 +91,12 @@ class _SignupScreenState extends State<SignupScreen> {
           ),
         ),
         child: SafeArea(
-          child: SingleChildScrollView( // Prevents layout breaking when the keyboard pops up
+          child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 30.0),
               child: Column(
-                cross Levant: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Back Button Custom Positioning
                   const SizedBox(height: 10),
                   IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
@@ -54,14 +105,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   
                   const SizedBox(height: 30),
                   
-                  // Header Title
                   const Text(
                     'Create Account',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -71,7 +117,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   
                   const SizedBox(height: 40),
 
-                  // Username Input Field
+                  // Username Input
                   TextField(
                     controller: _usernameController,
                     style: const TextStyle(color: Colors.white),
@@ -80,7 +126,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.person_outline, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.15),
+                      fillColor: Colors.white.withValues(alpha: 0.15),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -90,17 +136,17 @@ class _SignupScreenState extends State<SignupScreen> {
                   
                   const SizedBox(height: 20),
 
-                  // Password Input Field
+                  // Password Input
                   TextField(
                     controller: _passwordController,
-                    obscureText: true, // Hides password text
+                    obscureText: true,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Password',
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.lock_outline, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.15),
+                      fillColor: Colors.white.withValues(alpha: 0.15),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -108,59 +154,14 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                   ),
                   
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 40),
 
-                  // Primary Sign Up Button Connected to Supabase
+                  // Primary Sign Up Button
                   SizedBox(
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton(
-                      onPressed: () async {
-                        // 2. Extract and clean up the input strings
-                        final username = _usernameController.text.trim();
-                        final password = _passwordController.text.trim();
-
-                        // Simple validation check
-                        if (username.isEmpty || password.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please fill in all fields'),
-                              backgroundColor: Colors.orange,
-                            ),
-                          );
-                          return;
-                        }
-
-                        try {
-                          // 3. Send credentials to Supabase Auth
-                          // Because Supabase handles registration via email setups, we append a mock domain
-                          await Supabase.instance.client.auth.signUp(
-                            email: '$username@lockedin.com',
-                            password: password,
-                          );
-
-                          // 4. Alert user and slide back to the previous screen on complete success
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Sign up successful! Check your database.'),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                            Navigator.pop(context); // Takes them back to Welcome Screen
-                          }
-                        } catch (error) {
-                          // 5. Catch network failures or account duplicated issues safely
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error: ${error.toString()}'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
-                        }
-                      },
+                      onPressed: _isLoading ? null : _handleSignup,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xff222222),
@@ -169,54 +170,16 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
                         elevation: 2,
                       ),
-                      child: const Text(
-                        'Sign Up',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 30),
-
-                  // "OR" Separator Layout Line
-                  Row(
-                    children: [
-                      Expanded(child: Divider(color: Colors.white30, thickness: 1)),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16.0),
-                        child: Text('OR', style: TextStyle(color: Colors.white60, fontWeight: FontWeight.w500)),
-                      ),
-                      Expanded(child: Divider(color: Colors.white30, thickness: 1)),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 30),
-
-                  // Google Sign Up Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: OutlinedButton(
-                      onPressed: () {
-                        // TODO: Handle Google authentication logic here
-                      },
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.white, width: 1.5),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.g_mobiledata_rounded, color: Colors.white, size: 36),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'Sign up with Google',
-                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(color: Color(0xff222222), strokeWidth: 2.5),
+                            )
+                          : const Text(
+                              'Sign Up',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ),
                 ],
