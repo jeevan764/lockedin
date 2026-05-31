@@ -1,6 +1,7 @@
 // lib/screens/signup_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dashboard_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -56,7 +57,13 @@ class _SignupScreenState extends State<SignupScreen> {
 
         if (mounted) {
           _showSnackBar('Account created successfully!', Colors.green);
-          Navigator.pop(context); // Return to Welcome Screen
+          
+          // --- FIXED THIS LINE BELOW ---
+          // Replaced Navigator.pop(context) with pushReplacement to go straight to Dashboard
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const DashboardScreen()),
+          );
         }
       }
     } on AuthException catch (error) {
