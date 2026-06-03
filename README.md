@@ -61,4 +61,4 @@ LockedIn utilizes a modern Serverless/BaaS architecture to ensure a seamless cro
 * **Backend-as-a-Service (BaaS):** **Supabase**, leveraging its native authentication management engine to securely handle session tokens.
 * **Database:** **PostgreSQL (via Supabase)** to handle complex relational links between user records, profile attributes, micro-tasks, and social metadata.
 
-#### Technical Architecture Pipeline
+
