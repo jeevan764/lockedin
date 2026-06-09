@@ -1,5 +1,6 @@
 // lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
+import 'feed_screen.dart';
 //import 'tasks_screen.dart'; // Ensure this file exists in the same directory
 
 class DashboardScreen extends StatefulWidget {
@@ -17,7 +18,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final List<Widget> _pages = [
     //const TasksScreen(), // Loads the dropdown module workspace by default
     const Center(child: Text('Record Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),
-    const Center(child: Text('Feed Screen\n(Coming in Milestone 3)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),
+    const FeedScreen(),
     const Center(child: Text('Profile Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),
   ];
 
