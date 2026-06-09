@@ -20,13 +20,12 @@ class FeedScreen extends StatelessWidget {
               style: TextStyle(
                 fontSize: 24, 
                 fontWeight: FontWeight.bold, 
-                color: Color(0xff5732a3) // Matches your branding
+                color: Color(0xff5732a3)
               ),
             ),
             const SizedBox(height: 16),
             _buildPostCard(),
             const SizedBox(height: 16),
-            // You can copy and paste _buildPostCard() multiple times here to show a scrolling feed
           ],
         ),
       ),
@@ -43,7 +42,6 @@ class FeedScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // User Info Row
             Row(
               children: [
                 const CircleAvatar(
@@ -54,7 +52,7 @@ class FeedScreen extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    Text('Jay Chong', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text('Jay Chong', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
                     Text('Feb 1st, 2026 at 11:30 AM', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
@@ -62,14 +60,12 @@ class FeedScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             
-            // Session Title
             const Text(
               'Linear Algebra Session: Tackling matrix!',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
             ),
             const SizedBox(height: 16),
             
-            // Map Placeholder
             Center(
               child: Container(
                 height: 150,
@@ -82,7 +78,7 @@ class FeedScreen extends StatelessWidget {
                   child: Text(
                     'NUS Central Library\nStudy Zone',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: const Color(0xff5732a3), fontWeight: FontWeight.bold),
+                    style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -90,7 +86,6 @@ class FeedScreen extends StatelessWidget {
             const SizedBox(height: 16),
             const Divider(),
             
-            // Stats Grid
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -110,15 +105,12 @@ class FeedScreen extends StatelessWidget {
             ),
             const Divider(),
             
-            // View Breakdown Button
             Center(
               child: TextButton(
-                onPressed: () {
-                  print("View Breakdown clicked");
-                },
+                onPressed: () {},
                 child: const Text(
                   'View Breakdown',
-                  style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold), // Matches red accent
+                  style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -128,7 +120,6 @@ class FeedScreen extends StatelessWidget {
     );
   }
 
-  // Helper widget for the grid stats
   Widget _buildStatColumn(String label, String value) {
     return Expanded(
       child: Column(
@@ -138,7 +129,7 @@ class FeedScreen extends StatelessWidget {
           Text(
             value,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black),
           ),
         ],
       ),

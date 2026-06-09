@@ -1,7 +1,6 @@
 // lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
-import 'feed_screen.dart';
-//import 'tasks_screen.dart'; // Ensure this file exists in the same directory
+import 'feed_screen.dart'; 
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -11,21 +10,20 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Sets 'Tasks' (index 0) as the initial view right after logging/signing up
+  // Sets 'Feed' (index 0) as the initial view right after authentication
   int _currentIndex = 0;
 
-  // Managed array holding your four primary app screens
+  // Reordered array matching your layout preference
   final List<Widget> _pages = [
-    //const TasksScreen(), // Loads the dropdown module workspace by default
-    const Center(child: Text('Record Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),
-    const FeedScreen(),
-    const Center(child: Text('Profile Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),
+    const FeedScreen(), // Index 0: Feed
+    const Center(child: Text('Calendar Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))), // Index 1: Calendar
+    const Center(child: Text('Record Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),   // Index 2: Record
+    const Center(child: Text('Profile Screen\n(Coming in Milestone 2)', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.black54))),  // Index 3: Profile
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Unified deep purple header themed directly from the Welcome Screen branding
       appBar: AppBar(
         title: RichText(
           text: const TextSpan(
@@ -42,20 +40,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               TextSpan(
                 text: 'In',
-                style: TextStyle(color: Color(0xffb73229)), // Red accent match
+                style: TextStyle(color: Color(0xffb73229)), 
               ),
             ],
           ),
         ),
         centerTitle: true,
-        backgroundColor: const Color(0xff5732a3), // Deep Purple Branding Theme
+        backgroundColor: const Color(0xff5732a3), 
         elevation: 0,
       ),
       
-      // Displays the active selected view layout
       body: _pages[_currentIndex],
       
-      // Bottom Navigation Framework
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
@@ -65,24 +61,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.white,
-        selectedItemColor: const Color(0xff5732a3), // Active selection highlight
+        selectedItemColor: const Color(0xff5732a3), 
         unselectedItemColor: Colors.black38,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.check_circle_outline), 
-            activeIcon: Icon(Icons.check_circle),
-            label: 'Tasks',
+            icon: Icon(Icons.people_outline), 
+            activeIcon: Icon(Icons.people),
+            label: 'Feed',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_month_outlined), 
+            activeIcon: Icon(Icons.calendar_month),
+            label: 'Calendar',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.radio_button_checked), 
             label: 'Record',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.people_outline), 
-            activeIcon: Icon(Icons.people),
-            label: 'Feed',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline), 
