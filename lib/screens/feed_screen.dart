@@ -6,24 +6,28 @@ class FeedScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.grey[100],
-      height: double.infinity,
-      width: double.infinity,
-      child: SingleChildScrollView(
+    return Scaffold(
+      backgroundColor: Colors.grey[100],
+      // 1. ADDED AN APPBAR: Automatically pushes content safely below the notch/clock line
+      appBar: AppBar(
+        title: const Text(
+          'Activity Feed',
+          style: TextStyle(
+            fontSize: 20, 
+            fontWeight: FontWeight.bold, 
+            color: Colors.white, // High contrast text for the purple background
+          ),
+        ),
+        backgroundColor: const Color(0xff5732a3), // Your signature deep purple
+        elevation: 0,
+        centerTitle: false,
+      ),
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Activity Feed',
-              style: TextStyle(
-                fontSize: 24, 
-                fontWeight: FontWeight.bold, 
-                color: Color(0xff5732a3)
-              ),
-            ),
-            const SizedBox(height: 16),
+            // Removed the old naked text row from here since the AppBar handles it now!
             _buildPostCard(),
             const SizedBox(height: 16),
           ],
