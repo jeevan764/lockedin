@@ -1,44 +1,100 @@
 // lib/screens/feed_screen.dart
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class FeedScreen extends StatelessWidget {
+class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
+
+  @override
+  State<FeedScreen> createState() => _FeedScreenState();
+}
+
+class _FeedScreenState extends State<FeedScreen> {
+  final _supabase = Supabase.instance.client;
+  List<dynamic> _feedData = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchActivityFeed();
+  }
+
+  Future<void> _fetchActivityFeed() async {
+    try {
+      // Fetches sessions and joins with the profiles table to get the username
+      final response = await _supabase
+          .from('study_sessions')
+          .select('*, profiles(username)')
+          .order('created_at', ascending: false);
+
+      setState(() {
+        _feedData = response;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading feed: $e');
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      // 1. ADDED AN APPBAR: Automatically pushes content safely below the notch/clock line
       appBar: AppBar(
-        title: const Text(
-          'Activity Feed',
-          style: TextStyle(
-            fontSize: 20, 
-            fontWeight: FontWeight.bold, 
-            color: Colors.white, // High contrast text for the purple background
-          ),
-        ),
-        backgroundColor: const Color(0xff5732a3), // Your signature deep purple
+        title: const Text('Activity Feed', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: const Color(0xff5732a3),
         elevation: 0,
         centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: () {
+              setState(() => _isLoading = true);
+              _fetchActivityFeed();
+            },
+          )
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Removed the old naked text row from here since the AppBar handles it now!
-            _buildPostCard(),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
+      body: _isLoading 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
+          : _feedData.isEmpty
+              ? const Center(child: Text('No activity yet. Go record a session!', style: TextStyle(color: Colors.grey)))
+              : RefreshIndicator(
+                  onRefresh: _fetchActivityFeed,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16.0),
+                    itemCount: _feedData.length,
+                    itemBuilder: (context, index) {
+                      final session = _feedData[index];
+                      // Safely extract username or default to 'Fellow Student'
+                      final username = session['profiles'] != null ? session['profiles']['username'] : 'Fellow Student';
+                      
+                      return _buildPostCard(
+                        username: username,
+                        subject: session['subject'],
+                        durationMins: session['duration_minutes'].toString(),
+                        location: session['location'],
+                        xp: session['xp_earned'].toString(),
+                      );
+                    },
+                  ),
+                ),
     );
   }
 
-  Widget _buildPostCard() {
+  // Updated to accept dynamic parameters
+  Widget _buildPostCard({
+    required String username, 
+    required String subject, 
+    required String durationMins, 
+    required String location, 
+    required String xp
+  }) {
     return Card(
       elevation: 2,
+      margin: const EdgeInsets.only(bottom: 16),
       color: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -55,34 +111,37 @@ class FeedScreen extends StatelessWidget {
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Jay Chong', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                    Text('Feb 1st, 2026 at 11:30 AM', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  children: [
+                    Text(username, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+                    const Text('Recently completed', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 16),
             
-            const Text(
-              'Linear Algebra Session: Tackling matrix!',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
+            Text(
+              '$subject Session',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
             ),
             const SizedBox(height: 16),
             
             Center(
               child: Container(
-                height: 150,
-                width: 150,
+                height: 130,
+                width: 130,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: const Color(0xff5732a3), width: 2),
                 ),
-                child: const Center(
-                  child: Text(
-                    'NUS Central Library\nStudy Zone',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      location,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
                   ),
                 ),
               ),
@@ -93,30 +152,17 @@ class FeedScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatColumn('Duration', '2h 15m'),
+                _buildStatColumn('Duration', '${durationMins}m'),
                 _buildVerticalDivider(),
-                _buildStatColumn('Subject', 'Linear Algebra\n(MA1512)'),
+                _buildStatColumn('Subject', subject),
               ],
             ),
             const Divider(),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatColumn('XP', '+250 XP'),
-                _buildVerticalDivider(),
-                _buildStatColumn('Tasks/Hr', '8.5'),
+                _buildStatColumn('XP Earned', '+$xp XP'),
               ],
-            ),
-            const Divider(),
-            
-            Center(
-              child: TextButton(
-                onPressed: () {},
-                child: const Text(
-                  'View Breakdown',
-                  style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold),
-                ),
-              ),
             ),
           ],
         ),
@@ -128,12 +174,14 @@ class FeedScreen extends StatelessWidget {
     return Expanded(
       child: Column(
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12), textAlign: TextAlign.center),
           const SizedBox(height: 4),
           Text(
             value,
             textAlign: TextAlign.center,
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'feed_screen.dart';     
 import 'tasks_screen.dart';    // <-- This import warning will now disappear!
 import 'profile_screen.dart';
+import 'record_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,7 +20,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final List<Widget> pages = [
       const FeedScreen(),                                           // Tab 0
       const TasksScreen(),                                          // Tab 1 (SWAPPED OUT THE PLACEHOLDER TEXT)
-      const Center(child: Text('Record Session Screen')),            // Tab 2
+      const RecordScreen(),            // Tab 2
       const ProfileScreen(),                                        // Tab 3 
     ];
 
