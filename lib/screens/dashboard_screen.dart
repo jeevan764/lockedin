@@ -1,9 +1,8 @@
 // lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
-import 'feed_screen.dart';     // 1. IMPORTED YOUR NEW FEED SCREEN HERE
+import 'feed_screen.dart';     
+import 'tasks_screen.dart';    // <-- This import warning will now disappear!
 import 'profile_screen.dart';
-// import 'tasks_screen.dart'; 
-// import 'record_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -17,12 +16,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 2. PLACED THE REALS SCREEN OBJECT AT INDEX 0 OF YOUR NAVIGATION LIST
     final List<Widget> pages = [
-      const FeedScreen(),                                           // Tab 0 (Live Activity Feed!)
-      const Center(child: Text('Tasks & Checklist Workspace')),      // Tab 1
+      const FeedScreen(),                                           // Tab 0
+      const TasksScreen(),                                          // Tab 1 (SWAPPED OUT THE PLACEHOLDER TEXT)
       const Center(child: Text('Record Session Screen')),            // Tab 2
-      const ProfileScreen(),                                        // Tab 3 (Houses Calendar inside)
+      const ProfileScreen(),                                        // Tab 3 
     ];
 
     return Scaffold(
@@ -33,7 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xff5732a3), // Your signature purple
+        selectedItemColor: const Color(0xff5732a3), 
         unselectedItemColor: Colors.black38,
         onTap: (index) => setState(() => _currentIndex = index),
         items: const [
