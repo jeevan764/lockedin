@@ -50,24 +50,25 @@ class _SignupScreenState extends State<SignupScreen> {
 
     try {
       // 2. Register account parameters inside secure Supabase Auth ledger
+      // UPDATED: Added the user_metadata 'data' map field so the database trigger catches the username
       final AuthResponse response = await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
+        data: {
+          'username': username,
+        },
       );
 
       final user = response.user;
 
       if (user != null) {
-        // 3. Map custom plaintext handle into the public profiles relational table
-        await Supabase.instance.client.from('profiles').insert({
-          'id': user.id, // Foreign Key bound to secure user account token ID
-          'username': username,
-        });
+        // 3. REMOVED manual .from('profiles').insert code block.
+        // Your database trigger executed automatically behind the scenes here!
 
         if (mounted) {
           _showSnackBar('Account created successfully!', Colors.green);
           
-          // 4. CLEAR stack memory and route user straight into the main tasks screen
+          // 4. CLEAR stack memory and route user straight into the main dashboard screen
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const DashboardScreen()),
@@ -78,7 +79,7 @@ class _SignupScreenState extends State<SignupScreen> {
       _showSnackBar(error.message, Colors.red);
     } catch (error) {
       // Catch-all debug point showcasing explicit PostgreSQL anomalies if they occur
-      _showSnackBar('Database Error: ${error.toString()}', Colors.red);
+      _showSnackBar('System Error: ${error.toString()}', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -149,7 +150,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.email_outlined, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withOpacity(0.15),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -169,7 +170,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.person_outline, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withOpacity(0.15),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -191,7 +192,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.lock_outline, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withOpacity(0.15),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,

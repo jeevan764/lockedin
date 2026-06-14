@@ -15,15 +15,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _email = "Loading...";
   bool _isLoadingProfile = true;
   
-  // NEW: State variables to hold the dynamic session data
   List<dynamic> _recentSessions = [];
   bool _isLoadingSessions = true;
+
+  // Social metrics state variables
+  int _followersCount = 0;
+  int _followingCount = 0;
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfile();
-    _fetchRecentSessions(); // Trigger the fetch when the screen loads
+    _fetchRecentSessions();
+    _fetchSocialMetrics(); // Fetch follow graph counts on startup
   }
 
   Future<void> _fetchUserProfile() async {
@@ -46,7 +50,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // NEW: Fetch only the sessions belonging to the logged-in user
   Future<void> _fetchRecentSessions() async {
     try {
       final user = _supabase.auth.currentUser;
@@ -54,9 +57,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final response = await _supabase
             .from('study_sessions')
             .select()
-            .eq('user_id', user.id) // Only get MY sessions
-            .order('created_at', ascending: false) // Newest first
-            .limit(5); // Only show the last 5 in the profile overview
+            .eq('user_id', user.id)
+            .order('created_at', ascending: false)
+            .limit(5);
 
         setState(() {
           _recentSessions = response;
@@ -66,6 +69,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       print('Error fetching personal sessions: $e');
       setState(() => _isLoadingSessions = false);
+    }
+  }
+
+  // Safe and compatible implementation to fetch follower and following counts
+  Future<void> _fetchSocialMetrics() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      // Fetch the raw rows and determine count from list length to avoid PostgrestList type errors
+      final List<dynamic> followersList = await _supabase
+          .from('follows')
+          .select('id')
+          .eq('following_id', user.id);
+
+      final List<dynamic> followingList = await _supabase
+          .from('follows')
+          .select('id')
+          .eq('follower_id', user.id);
+
+      setState(() {
+        _followersCount = followersList.length;
+        _followingCount = followingList.length;
+      });
+    } catch (e) {
+      print('Error parsing follower metrics: $e');
     }
   }
 
@@ -81,14 +110,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
               SliverAppBar(
-                expandedHeight: 180.0,
+                expandedHeight: 210.0, // Height expanded to neatly fit the social metrics row
                 floating: false,
                 pinned: true,
                 backgroundColor: const Color(0xff5732a3), 
                 elevation: 0,
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(
-                    padding: const EdgeInsets.only(top: 35.0), 
+                    padding: const EdgeInsets.only(top: 40.0), 
                     color: const Color(0xff5732a3),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -119,6 +148,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Text(
                           _email, 
                           style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7), fontWeight: FontWeight.w400)
+                        ),
+                        const SizedBox(height: 10),
+                        
+                        // Follower / Following Metric Display Counters
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '$_followingCount',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Following',
+                              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                            ),
+                            const SizedBox(width: 20),
+                            Text(
+                              '$_followersCount',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Followers',
+                              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -172,7 +228,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           
-          // NEW: Dynamic List Builder replacing the hardcoded cards
           if (_isLoadingSessions)
             const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
           else if (_recentSessions.isEmpty)
@@ -185,12 +240,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               final subject = session['subject'] ?? 'Unknown';
               final durationMins = session['duration_minutes'] ?? 0;
               
-              // Format duration to look clean
               final durationStr = durationMins >= 60 
                   ? '${(durationMins / 60).toStringAsFixed(1)} hrs' 
                   : '$durationMins mins';
               
-              // Calculate Time Ago
               String timeAgo = 'Recently';
               if (session['created_at'] != null) {
                 final diff = DateTime.now().difference(DateTime.parse(session['created_at']));
