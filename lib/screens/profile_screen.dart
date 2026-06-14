@@ -1,6 +1,8 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'package:intl/intl.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -15,15 +17,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _email = "Loading...";
   bool _isLoadingProfile = true;
   
-  // NEW: State variables to hold the dynamic session data
-  List<dynamic> _recentSessions = [];
+  List<dynamic> _allSessions = [];
   bool _isLoadingSessions = true;
+
+  // Analytics Variables
+  double _totalFocusHours = 0;
+  int _currentStreak = 0;
+
+  // Calendar Variables
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+  Map<DateTime, List<dynamic>> _sessionsByDay = {};
 
   @override
   void initState() {
     super.initState();
+    _selectedDay = _focusedDay;
     _fetchUserProfile();
-    _fetchRecentSessions(); // Trigger the fetch when the screen loads
+    _fetchUserSessions(); 
   }
 
   Future<void> _fetchUserProfile() async {
@@ -38,36 +49,162 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       }
     } catch (e) {
-      setState(() {
-        _username = "Academic Athlete";
-        _email = _supabase.auth.currentUser?.email ?? "student@u.nus.edu";
-        _isLoadingProfile = false;
-      });
+      setState(() => _isLoadingProfile = false);
     }
   }
 
-  // NEW: Fetch only the sessions belonging to the logged-in user
-  Future<void> _fetchRecentSessions() async {
+  Future<void> _fetchUserSessions() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user != null) {
         final response = await _supabase
             .from('study_sessions')
             .select()
-            .eq('user_id', user.id) // Only get MY sessions
-            .order('created_at', ascending: false) // Newest first
-            .limit(5); // Only show the last 5 in the profile overview
+            .eq('user_id', user.id)
+            .order('created_at', ascending: false);
+
+        _processAnalytics(response);
 
         setState(() {
-          _recentSessions = response;
+          _allSessions = response;
           _isLoadingSessions = false;
         });
       }
     } catch (e) {
-      print('Error fetching personal sessions: $e');
       setState(() => _isLoadingSessions = false);
     }
   }
+
+  void _processAnalytics(List<dynamic> sessions) {
+    double totalMins = 0;
+    Map<DateTime, int> dailyMinutesMap = {};
+    Map<DateTime, List<dynamic>> groupedSessions = {};
+
+    for (var session in sessions) {
+      if (session['created_at'] == null) continue;
+      
+      int duration = session['duration_minutes'] ?? 0;
+      totalMins += duration;
+
+      DateTime rawDate = DateTime.parse(session['created_at']).toLocal();
+      DateTime cleanDate = DateTime(rawDate.year, rawDate.month, rawDate.day);
+
+      dailyMinutesMap[cleanDate] = (dailyMinutesMap[cleanDate] ?? 0) + duration;
+
+      if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
+      groupedSessions[cleanDate]!.add(session);
+    }
+
+    int streak = 0;
+    DateTime checkDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+
+    if ((dailyMinutesMap[checkDate] ?? 0) < 30) {
+      checkDate = checkDate.subtract(const Duration(days: 1));
+    }
+
+    while ((dailyMinutesMap[checkDate] ?? 0) >= 30) {
+      streak++;
+      checkDate = checkDate.subtract(const Duration(days: 1));
+    }
+
+    setState(() {
+      _totalFocusHours = totalMins / 60.0;
+      _currentStreak = streak;
+      _sessionsByDay = groupedSessions;
+    });
+  }
+
+  List<dynamic> _getEventsForDay(DateTime day) {
+    DateTime cleanDay = DateTime(day.year, day.month, day.day);
+    return _sessionsByDay[cleanDay] ?? [];
+  }
+
+  // --- NEW: EDIT & DELETE LOGIC ---
+  Future<void> _updateSession(String id, String subject, int duration, String location) async {
+    try {
+      await _supabase.from('study_sessions').update({
+        'subject': subject,
+        'duration_minutes': duration,
+        'location': location,
+        'xp_earned': duration * 2, // Recalculate XP just in case duration changed
+      }).eq('id', id);
+      
+      _fetchUserSessions(); // Refresh data to update analytics and UI
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _deleteSession(String id) async {
+    try {
+      await _supabase.from('study_sessions').delete().eq('id', id);
+      _fetchUserSessions(); // Refresh data
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  void _showEditDialog(Map<String, dynamic> session) {
+    final subjectController = TextEditingController(text: session['subject']);
+    final durationController = TextEditingController(text: session['duration_minutes'].toString());
+    final locationController = TextEditingController(text: session['location']);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Session', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: subjectController,
+                decoration: const InputDecoration(labelText: 'Task & Tag', hintText: 'e.g. Lab 1 (CS2030)'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: durationController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Duration (Minutes)'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: locationController,
+                decoration: const InputDecoration(labelText: 'Location'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _deleteSession(session['id']);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
+            onPressed: () {
+              final newDuration = int.tryParse(durationController.text) ?? 0;
+              if (subjectController.text.isNotEmpty && newDuration > 0) {
+                _updateSession(session['id'], subjectController.text, newDuration, locationController.text);
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+  // --------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -81,45 +218,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
               SliverAppBar(
-                expandedHeight: 180.0,
-                floating: false,
-                pinned: true,
-                backgroundColor: const Color(0xff5732a3), 
-                elevation: 0,
+                expandedHeight: 180.0, floating: false, pinned: true, backgroundColor: const Color(0xff5732a3), elevation: 0,
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(
-                    padding: const EdgeInsets.only(top: 35.0), 
-                    color: const Color(0xff5732a3),
+                    padding: const EdgeInsets.only(top: 35.0), color: const Color(0xff5732a3),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Stack(
                           alignment: Alignment.center,
                           children: [
-                            const SizedBox(
-                              width: 84, height: 84,
-                              child: CircularProgressIndicator(
-                                value: 0.74, strokeWidth: 5,
-                                backgroundColor: Colors.white24, 
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white), 
-                              ),
-                            ),
-                            const CircleAvatar(
-                              radius: 35, 
-                              backgroundColor: Color(0xfff1edfa), 
-                              child: Icon(Icons.school, size: 32, color: Color(0xff5732a3))
-                            ),
+                            const SizedBox(width: 84, height: 84, child: CircularProgressIndicator(value: 0.74, strokeWidth: 5, backgroundColor: Colors.white24, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))),
+                            const CircleAvatar(radius: 35, backgroundColor: Color(0xfff1edfa), child: Icon(Icons.school, size: 32, color: Color(0xff5732a3))),
                           ],
                         ),
                         const SizedBox(height: 10),
-                        Text(
-                          _username, 
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)
-                        ),
-                        Text(
-                          _email, 
-                          style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7), fontWeight: FontWeight.w400)
-                        ),
+                        Text(_username, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                        Text(_email, style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7), fontWeight: FontWeight.w400)),
                       ],
                     ),
                   ),
@@ -129,25 +244,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 pinned: true,
                 delegate: _SliverAppBarDelegate(
                   const TabBar(
-                    labelColor: Color(0xff5732a3),
-                    unselectedLabelColor: Colors.black38,
-                    indicatorColor: Color(0xff5732a3),
-                    indicatorSize: TabBarIndicatorSize.label,
-                    tabs: [
-                      Tab(icon: Icon(Icons.analytics_outlined), text: "Overview"),
-                      Tab(icon: Icon(Icons.calendar_month_outlined), text: "Calendar"),
-                    ],
+                    labelColor: Color(0xff5732a3), unselectedLabelColor: Colors.black38, indicatorColor: Color(0xff5732a3), indicatorSize: TabBarIndicatorSize.label,
+                    tabs: [Tab(icon: Icon(Icons.analytics_outlined), text: "Overview"), Tab(icon: Icon(Icons.calendar_month_outlined), text: "Calendar")],
                   ),
                 ),
               ),
             ];
           },
-          body: TabBarView(
-            children: [
-              _buildOverviewTab(),
-              _buildCalendarTab(),
-            ],
-          ),
+          body: TabBarView(children: [_buildOverviewTab(), _buildCalendarTab()]),
         ),
       ),
     );
@@ -164,46 +268,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
           GridView.count(
             crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.4,
             children: [
-              _buildMetricCard('Current Streak', '12 Days', Icons.local_fire_department, Colors.orange),
-              _buildMetricCard('Focus Hours', '42.5 hrs', Icons.timer_outlined, Colors.blue),
+              _buildMetricCard('Current Streak', '$_currentStreak Days', Icons.local_fire_department, Colors.orange),
+              _buildMetricCard('Focus Hours', '${_totalFocusHours.toStringAsFixed(1)} hrs', Icons.timer_outlined, Colors.blue),
             ],
           ),
           const SizedBox(height: 24),
           const Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           
-          // NEW: Dynamic List Builder replacing the hardcoded cards
           if (_isLoadingSessions)
             const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          else if (_recentSessions.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Text('No logged sessions yet. Time to get to work!', style: TextStyle(color: Colors.grey)),
-            )
+          else if (_allSessions.isEmpty)
+            const Text('No logged sessions yet. Get to work!', style: TextStyle(color: Colors.grey))
           else
-            ..._recentSessions.map((session) {
+            ..._allSessions.take(5).map((session) {
               final subject = session['subject'] ?? 'Unknown';
               final durationMins = session['duration_minutes'] ?? 0;
-              
-              // Format duration to look clean
-              final durationStr = durationMins >= 60 
-                  ? '${(durationMins / 60).toStringAsFixed(1)} hrs' 
-                  : '$durationMins mins';
-              
-              // Calculate Time Ago
-              String timeAgo = 'Recently';
-              if (session['created_at'] != null) {
-                final diff = DateTime.now().difference(DateTime.parse(session['created_at']));
-                if (diff.inDays > 1) timeAgo = '${diff.inDays} days ago';
-                else if (diff.inDays == 1) timeAgo = 'Yesterday';
-                else if (diff.inHours > 0) timeAgo = '${diff.inHours} hrs ago';
-                else if (diff.inMinutes > 0) timeAgo = '${diff.inMinutes} mins ago';
-                else timeAgo = 'Just now';
-              }
-
-              return _buildActivityItem(subject, durationStr, timeAgo);
+              final durationStr = durationMins >= 60 ? '${(durationMins / 60).toStringAsFixed(1)} hrs' : '$durationMins mins';
+              return _buildActivityItem(session, subject, durationStr, DateFormat('MMM d, h:mm a').format(DateTime.parse(session['created_at']).toLocal()));
             }),
-
+            
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity, height: 48,
@@ -223,36 +307,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildCalendarTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        children: [
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.black)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('June 2026', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Icon(Icons.chevron_right, color: Colors.black54),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    height: 200,
-                    color: Colors.black.withOpacity(0.03),
-                    child: const Center(child: Text('Calendar Grid Injects Here', style: TextStyle(color: Colors.black38))),
-                  ),
-                ],
-              ),
+    final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
+
+    return Column(
+      children: [
+        Card(
+          margin: const EdgeInsets.all(16),
+          elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: TableCalendar(
+            firstDay: DateTime.utc(2023, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay;
+              });
+            },
+            eventLoader: _getEventsForDay,
+            calendarStyle: CalendarStyle(
+              todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withOpacity(0.3), shape: BoxShape.circle),
+              selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
+              markerDecoration: const BoxDecoration(color: Color(0xffb73229), shape: BoxShape.circle),
             ),
+            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
           ),
-        ],
-      ),
+        ),
+        Expanded(
+          child: selectedEvents.isEmpty
+              ? const Center(child: Text("No sessions on this day.", style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: selectedEvents.length,
+                  itemBuilder: (context, index) {
+                    final session = selectedEvents[index];
+                    return _buildActivityItem(
+                      session,
+                      session['subject'], 
+                      '${session['duration_minutes']} mins', 
+                      session['location'] ?? 'Campus'
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -269,15 +368,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildActivityItem(String title, String duration, String timeAgo) {
+  Widget _buildActivityItem(Map<String, dynamic> session, String title, String duration, String subtitle) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8), elevation: 0, color: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black)),
       child: ListTile(
         dense: true,
         leading: const Icon(Icons.history_edu, color: Color(0xff5732a3)),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(duration),
-        trailing: Text(timeAgo, style: const TextStyle(fontSize: 11, color: Colors.black38)),
+        subtitle: Text(subtitle),
+        trailing: Text(duration, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xffb73229))),
+        // NEW: This makes the card tappable!
+        onTap: () => _showEditDialog(session),
       ),
     );
   }
@@ -286,14 +387,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   _SliverAppBarDelegate(this._tabBar);
   final TabBar _tabBar;
-
   @override double get minExtent => _tabBar.preferredSize.height;
   @override double get maxExtent => _tabBar.preferredSize.height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(color: const Color(0xfff8f9fa), child: _tabBar);
-  }
-
+  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => Container(color: const Color(0xfff8f9fa), child: _tabBar);
   @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
 }
