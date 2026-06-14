@@ -13,12 +13,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _supabase = Supabase.instance.client;
   String _username = "Loading...";
   String _email = "Loading...";
-  bool _isLoading = true;
+  bool _isLoadingProfile = true;
+  
+  // NEW: State variables to hold the dynamic session data
+  List<dynamic> _recentSessions = [];
+  bool _isLoadingSessions = true;
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfile();
+    _fetchRecentSessions(); // Trigger the fetch when the screen loads
   }
 
   Future<void> _fetchUserProfile() async {
@@ -29,21 +34,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _username = data['username'] ?? 'LockedIn User';
           _email = data['email'] ?? user.email ?? '';
-          _isLoading = false;
+          _isLoadingProfile = false;
         });
       }
     } catch (e) {
       setState(() {
         _username = "Academic Athlete";
-        _email = _supabase.auth.currentUser?.email ?? "selvajeevan2004@gmail.com";
-        _isLoading = false;
+        _email = _supabase.auth.currentUser?.email ?? "student@u.nus.edu";
+        _isLoadingProfile = false;
       });
+    }
+  }
+
+  // NEW: Fetch only the sessions belonging to the logged-in user
+  Future<void> _fetchRecentSessions() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final response = await _supabase
+            .from('study_sessions')
+            .select()
+            .eq('user_id', user.id) // Only get MY sessions
+            .order('created_at', ascending: false) // Newest first
+            .limit(5); // Only show the last 5 in the profile overview
+
+        setState(() {
+          _recentSessions = response;
+          _isLoadingSessions = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching personal sessions: $e');
+      setState(() => _isLoadingSessions = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
+    if (_isLoadingProfile) return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
 
     return DefaultTabController(
       length: 2,
@@ -52,17 +80,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
-              // 1. FIXED TOP HERO: Shifts content down below the camera notch and tints background purple
               SliverAppBar(
                 expandedHeight: 180.0,
                 floating: false,
                 pinned: true,
-                backgroundColor: const Color(0xff5732a3), // Your signature deep purple
+                backgroundColor: const Color(0xff5732a3), 
                 elevation: 0,
-                // Automatically handles device notch paddings safely
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(
-                    padding: const EdgeInsets.only(top: 35.0), // Adds defensive buffer clearance from status bar
+                    padding: const EdgeInsets.only(top: 35.0), 
                     color: const Color(0xff5732a3),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -70,12 +96,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Stack(
                           alignment: Alignment.center,
                           children: [
-                            SizedBox(
+                            const SizedBox(
                               width: 84, height: 84,
                               child: CircularProgressIndicator(
                                 value: 0.74, strokeWidth: 5,
-                                backgroundColor: Colors.white24, // Brightened track for visibility on purple
-                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white), 
+                                backgroundColor: Colors.white24, 
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white), 
                               ),
                             ),
                             const CircleAvatar(
@@ -99,17 +125,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
-              
-              // 2. STICKY SUB-NAVIGATION TABS
               SliverPersistentHeader(
                 pinned: true,
                 delegate: _SliverAppBarDelegate(
-                  TabBar(
-                    labelColor: const Color(0xff5732a3),
+                  const TabBar(
+                    labelColor: Color(0xff5732a3),
                     unselectedLabelColor: Colors.black38,
-                    indicatorColor: const Color(0xff5732a3),
+                    indicatorColor: Color(0xff5732a3),
                     indicatorSize: TabBarIndicatorSize.label,
-                    tabs: const [
+                    tabs: [
                       Tab(icon: Icon(Icons.analytics_outlined), text: "Overview"),
                       Tab(icon: Icon(Icons.calendar_month_outlined), text: "Calendar"),
                     ],
@@ -147,8 +171,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 24),
           const Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          _buildActivityItem('CS2040S Pset 3', '2.5 hrs', 'Yesterday'),
-          _buildActivityItem('MA1521 Review', '1.2 hrs', '3 days ago'),
+          
+          // NEW: Dynamic List Builder replacing the hardcoded cards
+          if (_isLoadingSessions)
+            const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
+          else if (_recentSessions.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Text('No logged sessions yet. Time to get to work!', style: TextStyle(color: Colors.grey)),
+            )
+          else
+            ..._recentSessions.map((session) {
+              final subject = session['subject'] ?? 'Unknown';
+              final durationMins = session['duration_minutes'] ?? 0;
+              
+              // Format duration to look clean
+              final durationStr = durationMins >= 60 
+                  ? '${(durationMins / 60).toStringAsFixed(1)} hrs' 
+                  : '$durationMins mins';
+              
+              // Calculate Time Ago
+              String timeAgo = 'Recently';
+              if (session['created_at'] != null) {
+                final diff = DateTime.now().difference(DateTime.parse(session['created_at']));
+                if (diff.inDays > 1) timeAgo = '${diff.inDays} days ago';
+                else if (diff.inDays == 1) timeAgo = 'Yesterday';
+                else if (diff.inHours > 0) timeAgo = '${diff.inHours} hrs ago';
+                else if (diff.inMinutes > 0) timeAgo = '${diff.inMinutes} mins ago';
+                else timeAgo = 'Just now';
+              }
+
+              return _buildActivityItem(subject, durationStr, timeAgo);
+            }),
+
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity, height: 48,
