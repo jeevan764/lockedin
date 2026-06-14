@@ -18,7 +18,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<dynamic> _recentSessions = [];
   bool _isLoadingSessions = true;
 
-  // Social metrics state variables
   int _followersCount = 0;
   int _followingCount = 0;
 
@@ -27,7 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _fetchUserProfile();
     _fetchRecentSessions();
-    _fetchSocialMetrics(); // Fetch follow graph counts on startup
+    _fetchSocialMetrics(); 
   }
 
   Future<void> _fetchUserProfile() async {
@@ -48,6 +47,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoadingProfile = false;
       });
     }
+  }
+
+  // Updates the username string attribute inside public.profiles table
+  Future<void> _updateUsername(String newUsername) async {
+    if (newUsername.trim().isEmpty) return;
+    
+    setState(() => _isLoadingProfile = true);
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      await _supabase
+          .from('profiles')
+          .update({'username': newUsername.trim()})
+          .eq('id', user.id);
+
+      setState(() {
+        _username = newUsername.trim();
+        _isLoadingProfile = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username updated successfully!')),
+      );
+    } catch (e) {
+      print('Profile save exception: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update username. Try again.')),
+      );
+      setState(() => _isLoadingProfile = false);
+    }
+  }
+
+  // Opens modal dialog context capturing new name profile parameters
+  void _showEditUsernameDialog() {
+    final editController = TextEditingController(text: _username);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Change Username', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: TextField(
+            controller: editController,
+            decoration: InputDecoration(
+              hintText: "Enter unique username",
+              filled: true,
+              fillColor: Colors.grey[100],
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xff5732a3),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                _updateUsername(editController.text);
+              },
+              child: const Text('Save', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _fetchRecentSessions() async {
@@ -72,22 +143,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Safe and compatible implementation to fetch follower and following counts
   Future<void> _fetchSocialMetrics() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
-      // Fetch the raw rows and determine count from list length to avoid PostgrestList type errors
-      final List<dynamic> followersList = await _supabase
-          .from('follows')
-          .select('id')
-          .eq('following_id', user.id);
-
-      final List<dynamic> followingList = await _supabase
-          .from('follows')
-          .select('id')
-          .eq('follower_id', user.id);
+      final List<dynamic> followersList = await _supabase.from('follows').select('id').eq('following_id', user.id);
+      final List<dynamic> followingList = await _supabase.from('follows').select('id').eq('follower_id', user.id);
 
       setState(() {
         _followersCount = followersList.length;
@@ -110,7 +172,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
               SliverAppBar(
-                expandedHeight: 210.0, // Height expanded to neatly fit the social metrics row
+                expandedHeight: 210.0, 
                 floating: false,
                 pinned: true,
                 backgroundColor: const Color(0xff5732a3), 
@@ -140,10 +202,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _username, 
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)
+                        const SizedBox(height: 6),
+                        
+                        // EDITABLE USERNAME ROW DISPLAY BLOCK
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(width: 32), // Balancing spacing trick
+                            Text(
+                              _username, 
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              icon: const Icon(Icons.edit, size: 16, color: Colors.white70),
+                              onPressed: _showEditUsernameDialog,
+                            ),
+                          ],
                         ),
                         Text(
                           _email, 
@@ -151,7 +228,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 10),
                         
-                        // Follower / Following Metric Display Counters
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -239,10 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ..._recentSessions.map((session) {
               final subject = session['subject'] ?? 'Unknown';
               final durationMins = session['duration_minutes'] ?? 0;
-              
-              final durationStr = durationMins >= 60 
-                  ? '${(durationMins / 60).toStringAsFixed(1)} hrs' 
-                  : '$durationMins mins';
+              final durationStr = durationMins >= 60 ? '${(durationMins / 60).toStringAsFixed(1)} hrs' : '$durationMins mins';
               
               String timeAgo = 'Recently';
               if (session['created_at'] != null) {
