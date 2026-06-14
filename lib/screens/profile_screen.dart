@@ -20,6 +20,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<dynamic> _allSessions = [];
   bool _isLoadingSessions = true;
 
+  // NEW: State variable to hold your tags
+  List<Map<String, dynamic>> _modules = [];
+
   // Analytics Variables
   double _totalFocusHours = 0;
   int _currentStreak = 0;
@@ -35,6 +38,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _selectedDay = _focusedDay;
     _fetchUserProfile();
     _fetchUserSessions(); 
+    _fetchModules(); // NEW: Fetch the tags when profile loads
   }
 
   Future<void> _fetchUserProfile() async {
@@ -72,6 +76,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       setState(() => _isLoadingSessions = false);
+    }
+  }
+
+  // NEW: Fetch modules to populate the dropdown in the edit dialog
+  Future<void> _fetchModules() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
+        if (mounted) {
+          setState(() {
+            _modules = List<Map<String, dynamic>>.from(data);
+          });
+        }
+      }
+    } catch (e) {
+      print('Error fetching modules: $e');
     }
   }
 
@@ -119,17 +140,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _sessionsByDay[cleanDay] ?? [];
   }
 
-  // --- NEW: EDIT & DELETE LOGIC ---
   Future<void> _updateSession(String id, String subject, int duration, String location) async {
     try {
       await _supabase.from('study_sessions').update({
         'subject': subject,
         'duration_minutes': duration,
         'location': location,
-        'xp_earned': duration * 2, // Recalculate XP just in case duration changed
+        'xp_earned': duration * 2,
       }).eq('id', id);
       
-      _fetchUserSessions(); // Refresh data to update analytics and UI
+      _fetchUserSessions(); 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red));
@@ -139,68 +159,118 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _deleteSession(String id) async {
     try {
       await _supabase.from('study_sessions').delete().eq('id', id);
-      _fetchUserSessions(); // Refresh data
+      _fetchUserSessions(); 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
     }
   }
 
+  // --- UPDATED: EDIT DIALOG WITH DROPDOWN ---
   void _showEditDialog(Map<String, dynamic> session) {
-    final subjectController = TextEditingController(text: session['subject']);
+    String rawSubject = session['subject'] ?? '';
+    String initialTaskName = rawSubject;
+    String? initialSelectedModule;
+
+    // Smart logic: If the session already has a tag formatted like "Task (Tag)", extract it
+    if (rawSubject.contains('(') && rawSubject.endsWith(')')) {
+      int openParen = rawSubject.lastIndexOf('(');
+      initialTaskName = rawSubject.substring(0, openParen).trim();
+      String tagName = rawSubject.substring(openParen + 1, rawSubject.length - 1).trim();
+
+      try {
+        initialSelectedModule = _modules.firstWhere((m) => m['name'] == tagName)['id'].toString();
+      } catch (e) {
+        initialSelectedModule = null; 
+      }
+    }
+
+    final taskNameController = TextEditingController(text: initialTaskName);
     final durationController = TextEditingController(text: session['duration_minutes'].toString());
     final locationController = TextEditingController(text: session['location']);
+    String? selectedModuleId = initialSelectedModule;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Session', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: subjectController,
-                decoration: const InputDecoration(labelText: 'Task & Tag', hintText: 'e.g. Lab 1 (CS2030)'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            title: const Text('Edit Session', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: taskNameController,
+                    decoration: const InputDecoration(labelText: 'Task Name', hintText: 'e.g. Tutorial 3'),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // NEW: Dynamic Tag Dropdown for editing
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        hint: const Text('Add/Change Tag...'),
+                        value: selectedModuleId,
+                        items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name']))).toList(),
+                        onChanged: (val) {
+                          setModalState(() => selectedModuleId = val);
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  TextField(
+                    controller: durationController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Duration (Minutes)'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: locationController,
+                    decoration: const InputDecoration(labelText: 'Location'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: durationController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Duration (Minutes)'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _deleteSession(session['id']);
+                },
+                child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: locationController,
-                decoration: const InputDecoration(labelText: 'Location'),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
+                onPressed: () {
+                  final newDuration = int.tryParse(durationController.text) ?? 0;
+                  if (taskNameController.text.isNotEmpty && newDuration > 0) {
+                    
+                    // Recombine the Task Name and Tag back into the formatted string
+                    String finalSubject = taskNameController.text.trim();
+                    if (selectedModuleId != null) {
+                       String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'];
+                       finalSubject = '$finalSubject ($modName)';
+                    }
+                    
+                    _updateSession(session['id'], finalSubject, newDuration, locationController.text);
+                    Navigator.pop(ctx);
+                  }
+                },
+                child: const Text('Save'),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _deleteSession(session['id']);
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
-            onPressed: () {
-              final newDuration = int.tryParse(durationController.text) ?? 0;
-              if (subjectController.text.isNotEmpty && newDuration > 0) {
-                _updateSession(session['id'], subjectController.text, newDuration, locationController.text);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+          );
+        }
       ),
     );
   }
@@ -377,7 +447,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(subtitle),
         trailing: Text(duration, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xffb73229))),
-        // NEW: This makes the card tappable!
         onTap: () => _showEditDialog(session),
       ),
     );
