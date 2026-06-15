@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'dashboard_screen.dart'; // Imports Jeevan's syncProfileNotifier
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -11,21 +12,20 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
-  String _username = "Loading...";
-  String _email = "Loading...";
-  bool _isLoadingProfile = true;
+  late TabController _tabController;
+
+  // Merged State Variables
+  List<dynamic> _myHistory = [];
+  List<Map<String, dynamic>> _modules = []; 
+  bool _isLoading = true;
   
-  List<dynamic> _allSessions = [];
-  bool _isLoadingSessions = true;
-
-  // NEW: State variable to hold your tags
-  List<Map<String, dynamic>> _modules = [];
-
-  // Analytics Variables
-  double _totalFocusHours = 0;
+  int _totalXp = 0;
   int _currentStreak = 0;
+  String _username = "Loading...";
+  int _followerCount = 0;
+  int _followingCount = 0;
 
   // Calendar Variables
   DateTime _focusedDay = DateTime.now();
@@ -36,103 +36,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
-    _fetchUserProfile();
-    _fetchUserSessions(); 
-    _fetchModules(); // NEW: Fetch the tags when profile loads
+    _tabController = TabController(length: 2, vsync: this);
+    
+    _loadProfileDetails();
+    _fetchModules();
+    
+    // Jeevan's background sync listener
+    syncProfileNotifier.addListener(_loadProfileDetails);
   }
 
-  Future<void> _fetchUserProfile() async {
+  @override
+  void dispose() {
+    _tabController.dispose();
+    syncProfileNotifier.removeListener(_loadProfileDetails);
+    super.dispose();
+  }
+
+  // --- CORE DATA FETCHING ---
+  Future<void> _loadProfileDetails() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
     try {
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final data = await _supabase.from('profiles').select('username, email').eq('id', user.id).single();
+      final currentUserId = _supabase.auth.currentUser?.id;
+      if (currentUserId == null) return;
+
+      // 1. Fetch Profile Info
+      final profileData = await _supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
+      if (profileData != null) _username = profileData['username'] ?? 'User';
+
+      // 2. Fetch Social Metrics
+      final followersData = await _supabase.from('follows').select('id').eq('following_id', currentUserId);
+      final followingData = await _supabase.from('follows').select('id').eq('follower_id', currentUserId);
+
+      // 3. Fetch Study History
+      final response = await _supabase
+          .from('study_sessions')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('created_at', ascending: false);
+
+      int xpCounter = 0;
+      Set<String> uniqueDates = {};
+      Map<DateTime, List<dynamic>> groupedSessions = {};
+
+      for (var row in response) {
+        xpCounter += (row['xp_earned'] as num).toInt();
+        
+        if (row['created_at'] != null) {
+          DateTime date = DateTime.parse(row['created_at']).toLocal();
+          DateTime cleanDate = DateTime(date.year, date.month, date.day);
+
+          uniqueDates.add("${date.year}-${date.month}-${date.day}");
+
+          if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
+          groupedSessions[cleanDate]!.add(row);
+        }
+      }
+
+      if (mounted) {
         setState(() {
-          _username = data['username'] ?? 'LockedIn User';
-          _email = data['email'] ?? user.email ?? '';
-          _isLoadingProfile = false;
+          _myHistory = response;
+          _totalXp = xpCounter;
+          _followerCount = followersData.length;
+          _followingCount = followingData.length;
+          _sessionsByDay = groupedSessions;
+          _currentStreak = _calculateStreak(uniqueDates);
+          _isLoading = false;
         });
       }
     } catch (e) {
-      setState(() => _isLoadingProfile = false);
+      print('Profile metrics load issue: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _fetchUserSessions() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final response = await _supabase
-            .from('study_sessions')
-            .select()
-            .eq('user_id', user.id)
-            .order('created_at', ascending: false);
-
-        _processAnalytics(response);
-
-        setState(() {
-          _allSessions = response;
-          _isLoadingSessions = false;
-        });
-      }
-    } catch (e) {
-      setState(() => _isLoadingSessions = false);
-    }
-  }
-
-  // NEW: Fetch modules to populate the dropdown in the edit dialog
   Future<void> _fetchModules() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user != null) {
         final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
-        if (mounted) {
-          setState(() {
-            _modules = List<Map<String, dynamic>>.from(data);
-          });
-        }
+        if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
       }
     } catch (e) {
       print('Error fetching modules: $e');
     }
   }
 
-  void _processAnalytics(List<dynamic> sessions) {
-    double totalMins = 0;
-    Map<DateTime, int> dailyMinutesMap = {};
-    Map<DateTime, List<dynamic>> groupedSessions = {};
-
-    for (var session in sessions) {
-      if (session['created_at'] == null) continue;
-      
-      int duration = session['duration_minutes'] ?? 0;
-      totalMins += duration;
-
-      DateTime rawDate = DateTime.parse(session['created_at']).toLocal();
-      DateTime cleanDate = DateTime(rawDate.year, rawDate.month, rawDate.day);
-
-      dailyMinutesMap[cleanDate] = (dailyMinutesMap[cleanDate] ?? 0) + duration;
-
-      if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
-      groupedSessions[cleanDate]!.add(session);
-    }
-
+  int _calculateStreak(Set<String> uniqueDates) {
     int streak = 0;
-    DateTime checkDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    DateTime checkDate = DateTime.now();
 
-    if ((dailyMinutesMap[checkDate] ?? 0) < 30) {
-      checkDate = checkDate.subtract(const Duration(days: 1));
+    while (true) {
+      String checkStr = "${checkDate.year}-${checkDate.month}-${checkDate.day}";
+      if (uniqueDates.contains(checkStr)) {
+        streak++;
+        checkDate = checkDate.subtract(const Duration(days: 1));
+      } else {
+        if (streak == 0) {
+          DateTime yesterday = DateTime.now().subtract(const Duration(days: 1));
+          String yestStr = "${yesterday.year}-${yesterday.month}-${yesterday.day}";
+          if (uniqueDates.contains(yestStr)) {
+            checkDate = yesterday;
+            continue;
+          }
+        }
+        break;
+      }
     }
-
-    while ((dailyMinutesMap[checkDate] ?? 0) >= 30) {
-      streak++;
-      checkDate = checkDate.subtract(const Duration(days: 1));
-    }
-
-    setState(() {
-      _totalFocusHours = totalMins / 60.0;
-      _currentStreak = streak;
-      _sessionsByDay = groupedSessions;
-    });
+    return streak;
   }
 
   List<dynamic> _getEventsForDay(DateTime day) {
@@ -140,6 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _sessionsByDay[cleanDay] ?? [];
   }
 
+  // --- EDIT & DELETE LOGIC ---
   Future<void> _updateSession(String id, String subject, int duration, String location) async {
     try {
       await _supabase.from('study_sessions').update({
@@ -149,7 +162,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'xp_earned': duration * 2,
       }).eq('id', id);
       
-      _fetchUserSessions(); 
+      _loadProfileDetails(); // Refresh the page stats
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red));
@@ -159,25 +172,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _deleteSession(String id) async {
     try {
       await _supabase.from('study_sessions').delete().eq('id', id);
-      _fetchUserSessions(); 
+      _loadProfileDetails(); 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
     }
   }
 
-  // --- UPDATED: EDIT DIALOG WITH DROPDOWN ---
   void _showEditDialog(Map<String, dynamic> session) {
     String rawSubject = session['subject'] ?? '';
     String initialTaskName = rawSubject;
     String? initialSelectedModule;
 
-    // Smart logic: If the session already has a tag formatted like "Task (Tag)", extract it
     if (rawSubject.contains('(') && rawSubject.endsWith(')')) {
       int openParen = rawSubject.lastIndexOf('(');
       initialTaskName = rawSubject.substring(0, openParen).trim();
       String tagName = rawSubject.substring(openParen + 1, rawSubject.length - 1).trim();
-
       try {
         initialSelectedModule = _modules.firstWhere((m) => m['name'] == tagName)['id'].toString();
       } catch (e) {
@@ -200,13 +210,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: taskNameController,
-                    decoration: const InputDecoration(labelText: 'Task Name', hintText: 'e.g. Tutorial 3'),
-                  ),
+                  TextField(controller: taskNameController, decoration: const InputDecoration(labelText: 'Task Name', hintText: 'e.g. Tutorial 3')),
                   const SizedBox(height: 16),
-                  
-                  // NEW: Dynamic Tag Dropdown for editing
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
@@ -216,24 +221,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         hint: const Text('Add/Change Tag...'),
                         value: selectedModuleId,
                         items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name']))).toList(),
-                        onChanged: (val) {
-                          setModalState(() => selectedModuleId = val);
-                        },
+                        onChanged: (val) => setModalState(() => selectedModuleId = val),
                       ),
                     ),
                   ),
                   const SizedBox(height: 10),
-                  
-                  TextField(
-                    controller: durationController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Duration (Minutes)'),
-                  ),
+                  TextField(controller: durationController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Duration (Minutes)')),
                   const SizedBox(height: 10),
-                  TextField(
-                    controller: locationController,
-                    decoration: const InputDecoration(labelText: 'Location'),
-                  ),
+                  TextField(controller: locationController, decoration: const InputDecoration(labelText: 'Location')),
                 ],
               ),
             ),
@@ -245,23 +240,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
                 child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-              ),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
                 onPressed: () {
                   final newDuration = int.tryParse(durationController.text) ?? 0;
                   if (taskNameController.text.isNotEmpty && newDuration > 0) {
-                    
-                    // Recombine the Task Name and Tag back into the formatted string
                     String finalSubject = taskNameController.text.trim();
                     if (selectedModuleId != null) {
                        String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'];
                        finalSubject = '$finalSubject ($modName)';
                     }
-                    
                     _updateSession(session['id'], finalSubject, newDuration, locationController.text);
                     Navigator.pop(ctx);
                   }
@@ -274,109 +263,117 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
-  // --------------------------------
 
+  // --- UI BUILDERS ---
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingProfile) return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
+    final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        backgroundColor: const Color(0xfff8f9fa),
-        body: NestedScrollView(
-          headerSliverBuilder: (context, innerBoxIsScrolled) {
-            return [
-              SliverAppBar(
-                expandedHeight: 180.0, floating: false, pinned: true, backgroundColor: const Color(0xff5732a3), elevation: 0,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Container(
-                    padding: const EdgeInsets.only(top: 35.0), color: const Color(0xff5732a3),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            const SizedBox(width: 84, height: 84, child: CircularProgressIndicator(value: 0.74, strokeWidth: 5, backgroundColor: Colors.white24, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))),
-                            const CircleAvatar(radius: 35, backgroundColor: Color(0xfff1edfa), child: Icon(Icons.school, size: 32, color: Color(0xff5732a3))),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Text(_username, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                        Text(_email, style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7), fontWeight: FontWeight.w400)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _SliverAppBarDelegate(
-                  const TabBar(
-                    labelColor: Color(0xff5732a3), unselectedLabelColor: Colors.black38, indicatorColor: Color(0xff5732a3), indicatorSize: TabBarIndicatorSize.label,
-                    tabs: [Tab(icon: Icon(Icons.analytics_outlined), text: "Overview"), Tab(icon: Icon(Icons.calendar_month_outlined), text: "Calendar")],
-                  ),
-                ),
-              ),
-            ];
-          },
-          body: TabBarView(children: [_buildOverviewTab(), _buildCalendarTab()]),
-        ),
+    return Scaffold(
+      backgroundColor: const Color(0xfff8f9fa),
+      appBar: AppBar(
+        title: const Text('My Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xff5732a3),
+        elevation: 0,
       ),
-    );
-  }
-
-  Widget _buildOverviewTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Performance Analytics', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.4,
-            children: [
-              _buildMetricCard('Current Streak', '$_currentStreak Days', Icons.local_fire_department, Colors.orange),
-              _buildMetricCard('Focus Hours', '${_totalFocusHours.toStringAsFixed(1)} hrs', Icons.timer_outlined, Colors.blue),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          
-          if (_isLoadingSessions)
-            const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          else if (_allSessions.isEmpty)
-            const Text('No logged sessions yet. Get to work!', style: TextStyle(color: Colors.grey))
-          else
-            ..._allSessions.take(5).map((session) {
-              final subject = session['subject'] ?? 'Unknown';
-              final durationMins = session['duration_minutes'] ?? 0;
-              final durationStr = durationMins >= 60 ? '${(durationMins / 60).toStringAsFixed(1)} hrs' : '$durationMins mins';
-              return _buildActivityItem(session, subject, durationStr, DateFormat('MMM d, h:mm a').format(DateTime.parse(session['created_at']).toLocal()));
-            }),
-            
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity, height: 48,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                await _supabase.auth.signOut();
-                if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-              },
-              icon: const Icon(Icons.logout, color: Color(0xffb73229), size: 18),
-              label: const Text('Sign Out', style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold)),
-              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xffb73229))),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
+          : Column(
+              children: [
+                // Jeevan's Top Hero Section
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xff5732a3),
+                  padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
+                  child: Column(
+                    children: [
+                      const CircleAvatar(radius: 36, backgroundColor: Colors.white, child: Icon(Icons.person, size: 40, color: Color(0xff5732a3))),
+                      const SizedBox(height: 10),
+                      Text('@$_username', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(height: 12),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('$_followerCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          const Text(' Followers', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          const SizedBox(width: 24),
+                          Text('$_followingCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          const Text(' Following', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Column(
+                            children: [
+                              Text('$_totalXp', style: const TextStyle(color: Colors.greenAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                              const Text('TOTAL XP', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                          Container(width: 1, height: 24, color: Colors.white24),
+                          Column(
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.local_fire_department, color: Colors.orangeAccent, size: 20),
+                                  Text('$_currentStreak', style: const TextStyle(color: Colors.orangeAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              const Text('DAY STREAK', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Tabs
+                Container(
+                  color: Colors.white,
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: const Color(0xff5732a3),
+                    unselectedLabelColor: Colors.black54,
+                    indicatorColor: const Color(0xff5732a3),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    tabs: const [
+                      Tab(icon: Icon(Icons.calendar_month), text: "Calendar"),
+                      Tab(icon: Icon(Icons.history), text: "History Log"),
+                    ],
+                  ),
+                ),
+                
+                // Your Interactive Calendar & Log Views
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildInteractiveCalendarTab(), 
+                      
+                      _myHistory.isEmpty   
+                          ? const Center(child: Text('No study history recorded.', style: TextStyle(color: Colors.grey)))
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _myHistory.length,
+                              itemBuilder: (context, index) {
+                                return _buildActivityItem(_myHistory[index]);
+                              },
+                            ),
+                    ],
+                  ),
+                )
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildCalendarTab() {
+  // Uses your interactive table_calendar logic instead of the static grid
+  Widget _buildInteractiveCalendarTab() {
     final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
 
     return Column(
@@ -411,13 +408,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: selectedEvents.length,
                   itemBuilder: (context, index) {
-                    final session = selectedEvents[index];
-                    return _buildActivityItem(
-                      session,
-                      session['subject'], 
-                      '${session['duration_minutes']} mins', 
-                      session['location'] ?? 'Campus'
-                    );
+                    return _buildActivityItem(selectedEvents[index]);
                   },
                 ),
         ),
@@ -425,39 +416,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
+  // Reusable card for both the Calendar tab and History Log tab
+  Widget _buildActivityItem(Map<String, dynamic> session) {
     return Card(
-      elevation: 0, color: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black)),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(title, style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.w600)), Icon(icon, color: color, size: 18)]),
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _buildActivityItem(Map<String, dynamic> session, String title, String duration, String subtitle) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8), elevation: 0, color: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black)),
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
       child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.history_edu, color: Color(0xff5732a3)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(subtitle),
-        trailing: Text(duration, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xffb73229))),
-        onTap: () => _showEditDialog(session),
+        leading: const Icon(Icons.history, color: Colors.grey),
+        title: Text(session['subject'] ?? 'Unknown Task', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
+        trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+        onTap: () => _showEditDialog(session), // Triggers your edit logic!
       ),
     );
   }
-}
-
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
-  _SliverAppBarDelegate(this._tabBar);
-  final TabBar _tabBar;
-  @override double get minExtent => _tabBar.preferredSize.height;
-  @override double get maxExtent => _tabBar.preferredSize.height;
-  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => Container(color: const Color(0xfff8f9fa), child: _tabBar);
-  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
 }
