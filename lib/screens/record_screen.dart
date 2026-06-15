@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dashboard_screen.dart'; // Imports Jeevan's sync notifiers
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
@@ -23,7 +24,7 @@ class _RecordScreenState extends State<RecordScreen> {
   bool _isTimerMode = true;
   
   // Inputs State
-  final _taskNameController = TextEditingController(); // NEW: Task Name Input
+  final _taskNameController = TextEditingController(); 
   final _durationController = TextEditingController();
   final _locationController = TextEditingController();
 
@@ -86,13 +87,15 @@ class _RecordScreenState extends State<RecordScreen> {
       final user = _supabase.auth.currentUser;
       if (user != null) {
         final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
-        setState(() {
-          _modules = List<Map<String, dynamic>>.from(data);
-          _isLoadingModules = false;
-        });
+        if (mounted) {
+          setState(() {
+            _modules = List<Map<String, dynamic>>.from(data);
+            _isLoadingModules = false;
+          });
+        }
       }
     } catch (e) {
-      setState(() => _isLoadingModules = false);
+      if (mounted) setState(() => _isLoadingModules = false);
     }
   }
 
@@ -107,13 +110,15 @@ class _RecordScreenState extends State<RecordScreen> {
         'color_hex': '0xff5732a3', 
       }).select().single();
 
-      setState(() {
-        _modules.add(response);
-        _selectedModuleId = response['id'];
-        _selectedModuleName = response['name'];
-      });
+      if (mounted) {
+        setState(() {
+          _modules.add(response);
+          _selectedModuleId = response['id'].toString();
+          _selectedModuleName = response['name'];
+        });
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create tag: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create tag: $e')));
     }
   }
 
@@ -160,6 +165,7 @@ class _RecordScreenState extends State<RecordScreen> {
         'duration_minutes': durationMins,
         'location': location,
         'xp_earned': xp,
+        'created_at': DateTime.now().toIso8601String(), // Retained Jeevan's explicit timestamp
       });
 
       if (mounted) {
@@ -168,6 +174,10 @@ class _RecordScreenState extends State<RecordScreen> {
         _taskNameController.clear();
         _durationController.clear();
         _locationController.clear();
+
+        // Retained Jeevan's broadcast payloads
+        syncFeedNotifier.value++;
+        syncProfileNotifier.value++;
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -221,7 +231,7 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
             const SizedBox(height: 30),
 
-            // NEW: Task Name Input
+            // Task Name Input
             TextField(
               controller: _taskNameController,
               decoration: InputDecoration(
@@ -245,7 +255,7 @@ class _RecordScreenState extends State<RecordScreen> {
                       hint: const Text('Choose Module Tag...', style: TextStyle(fontWeight: FontWeight.bold)),
                       value: _selectedModuleId,
                       items: [
-                        ..._modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name']))).toList(),
+                        ..._modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name'].toString()))).toList(),
                         const DropdownMenuItem(value: 'ADD_NEW', child: Text('+ Add New Tag', style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold))),
                       ],
                       onChanged: (val) {
@@ -254,7 +264,7 @@ class _RecordScreenState extends State<RecordScreen> {
                         } else {
                           setState(() {
                             _selectedModuleId = val;
-                            _selectedModuleName = _modules.firstWhere((m) => m['id'] == val)['name'];
+                            _selectedModuleName = _modules.firstWhere((m) => m['id'].toString() == val)['name'].toString();
                           });
                         }
                       },
@@ -263,7 +273,6 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
             const SizedBox(height: 30),
 
-            // Dynamic View (Timer OR Manual Input)
             if (_isTimerMode) _buildTimerView() else _buildManualView(),
 
             const SizedBox(height: 30),

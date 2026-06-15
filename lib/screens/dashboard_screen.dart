@@ -1,9 +1,13 @@
 // lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'feed_screen.dart';     
-import 'tasks_screen.dart';    // <-- This import warning will now disappear!
+import 'tasks_screen.dart';    
 import 'profile_screen.dart';
 import 'record_screen.dart';
+
+// Central notification bus that signals background views to invalidate memory caches
+final ValueNotifier<int> syncFeedNotifier = ValueNotifier<int>(0);
+final ValueNotifier<int> syncProfileNotifier = ValueNotifier<int>(0);
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -18,10 +22,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
-      const FeedScreen(),                                           // Tab 0
-      const TasksScreen(),                                          // Tab 1 (SWAPPED OUT THE PLACEHOLDER TEXT)
-      const RecordScreen(),            // Tab 2
-      const ProfileScreen(),                                        // Tab 3 
+      const FeedScreen(),                                           
+      const TasksScreen(),                                          
+      const RecordScreen(),            
+      const ProfileScreen(),                                        
     ];
 
     return Scaffold(
@@ -34,7 +38,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         type: BottomNavigationBarType.fixed,
         selectedItemColor: const Color(0xff5732a3), 
         unselectedItemColor: Colors.black38,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: (index) {
+          setState(() => _currentIndex = index);
+          // Fallback force-updates active screens on manual tap events
+          if (index == 0) syncFeedNotifier.value++;
+          if (index == 3) syncProfileNotifier.value++;
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.people_outline), activeIcon: Icon(Icons.people), label: 'Feed'),
           BottomNavigationBarItem(icon: Icon(Icons.check_box_outlined), activeIcon: Icon(Icons.check_box), label: 'Tasks'),

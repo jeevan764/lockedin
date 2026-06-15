@@ -1,9 +1,7 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:table_calendar/table_calendar.dart';
-import 'package:intl/intl.dart';
-import 'dashboard_screen.dart'; // Imports Jeevan's syncProfileNotifier
+import 'dashboard_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,32 +14,25 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   final _supabase = Supabase.instance.client;
   late TabController _tabController;
 
-  // Merged State Variables
   List<dynamic> _myHistory = [];
-  List<Map<String, dynamic>> _modules = []; 
+  List<Map<String, dynamic>> _modules = []; // NEW: Tag memory
   bool _isLoading = true;
-  
   int _totalXp = 0;
   int _currentStreak = 0;
   String _username = "Loading...";
   int _followerCount = 0;
   int _followingCount = 0;
+  Set<int> _activeDaysInMonth = {}; 
 
-  // Calendar Variables
-  DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
-  Map<DateTime, List<dynamic>> _sessionsByDay = {};
+  final List<String> _weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  final DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = _focusedDay;
     _tabController = TabController(length: 2, vsync: this);
-    
     _loadProfileDetails();
-    _fetchModules();
-    
-    // Jeevan's background sync listener
+    _fetchModules(); // NEW: Grabs tags on load
     syncProfileNotifier.addListener(_loadProfileDetails);
   }
 
@@ -50,65 +41,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     _tabController.dispose();
     syncProfileNotifier.removeListener(_loadProfileDetails);
     super.dispose();
-  }
-
-  // --- CORE DATA FETCHING ---
-  Future<void> _loadProfileDetails() async {
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
-    try {
-      final currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId == null) return;
-
-      // 1. Fetch Profile Info
-      final profileData = await _supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
-      if (profileData != null) _username = profileData['username'] ?? 'User';
-
-      // 2. Fetch Social Metrics
-      final followersData = await _supabase.from('follows').select('id').eq('following_id', currentUserId);
-      final followingData = await _supabase.from('follows').select('id').eq('follower_id', currentUserId);
-
-      // 3. Fetch Study History
-      final response = await _supabase
-          .from('study_sessions')
-          .select('*')
-          .eq('user_id', currentUserId)
-          .order('created_at', ascending: false);
-
-      int xpCounter = 0;
-      Set<String> uniqueDates = {};
-      Map<DateTime, List<dynamic>> groupedSessions = {};
-
-      for (var row in response) {
-        xpCounter += (row['xp_earned'] as num).toInt();
-        
-        if (row['created_at'] != null) {
-          DateTime date = DateTime.parse(row['created_at']).toLocal();
-          DateTime cleanDate = DateTime(date.year, date.month, date.day);
-
-          uniqueDates.add("${date.year}-${date.month}-${date.day}");
-
-          if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
-          groupedSessions[cleanDate]!.add(row);
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _myHistory = response;
-          _totalXp = xpCounter;
-          _followerCount = followersData.length;
-          _followingCount = followingData.length;
-          _sessionsByDay = groupedSessions;
-          _currentStreak = _calculateStreak(uniqueDates);
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      print('Profile metrics load issue: $e');
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 
   Future<void> _fetchModules() async {
@@ -120,6 +52,61 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       }
     } catch (e) {
       print('Error fetching modules: $e');
+    }
+  }
+
+  Future<void> _loadProfileDetails() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final currentUserId = _supabase.auth.currentUser?.id;
+      if (currentUserId == null) return;
+
+      final profileData = await _supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
+      if (profileData != null) _username = profileData['username'] ?? 'User';
+
+      final followersData = await _supabase.from('follows').select('id').eq('following_id', currentUserId);
+      final followingData = await _supabase.from('follows').select('id').eq('follower_id', currentUserId);
+
+      final response = await _supabase
+          .from('study_sessions')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('created_at', ascending: false);
+
+      int xpCounter = 0;
+      Set<String> uniqueDates = {};
+      Set<int> daysInMonth = {};
+
+      for (var row in response) {
+        xpCounter += (row['xp_earned'] as num).toInt();
+        
+        if (row['created_at'] != null) {
+          DateTime date = DateTime.parse(row['created_at']).toLocal();
+          String dateString = "${date.year}-${date.month}-${date.day}";
+          uniqueDates.add(dateString);
+
+          if (date.month == _now.month && date.year == _now.year) {
+            daysInMonth.add(date.day);
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _myHistory = response;
+          _totalXp = xpCounter;
+          _followerCount = followersData.length;
+          _followingCount = followingData.length;
+          _activeDaysInMonth = daysInMonth;
+          _currentStreak = _calculateStreak(uniqueDates);
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Profile metrics load issue: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -147,12 +134,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return streak;
   }
 
-  List<dynamic> _getEventsForDay(DateTime day) {
-    DateTime cleanDay = DateTime(day.year, day.month, day.day);
-    return _sessionsByDay[cleanDay] ?? [];
-  }
-
-  // --- EDIT & DELETE LOGIC ---
+  // --- NEW: EDIT & DELETE ACTIONS ---
   Future<void> _updateSession(String id, String subject, int duration, String location) async {
     try {
       await _supabase.from('study_sessions').update({
@@ -162,7 +144,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         'xp_earned': duration * 2,
       }).eq('id', id);
       
-      _loadProfileDetails(); // Refresh the page stats
+      _loadProfileDetails(); 
+      syncFeedNotifier.value++; // Ensure the social feed updates too!
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red));
@@ -173,17 +156,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     try {
       await _supabase.from('study_sessions').delete().eq('id', id);
       _loadProfileDetails(); 
+      syncFeedNotifier.value++;
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
     }
   }
 
-  void _showEditDialog(Map<String, dynamic> session) {
-    String rawSubject = session['subject'] ?? '';
+  void _showEditDialog(dynamic rawSession) {
+    final session = rawSession as Map<String, dynamic>;
+    final sessionId = session['id'].toString();
+    
+    String rawSubject = session['subject']?.toString() ?? '';
     String initialTaskName = rawSubject;
     String? initialSelectedModule;
 
+    // Disassembles "Task (Module)" back into dropdown components
     if (rawSubject.contains('(') && rawSubject.endsWith(')')) {
       int openParen = rawSubject.lastIndexOf('(');
       initialTaskName = rawSubject.substring(0, openParen).trim();
@@ -196,8 +184,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
 
     final taskNameController = TextEditingController(text: initialTaskName);
-    final durationController = TextEditingController(text: session['duration_minutes'].toString());
-    final locationController = TextEditingController(text: session['location']);
+    final durationController = TextEditingController(text: session['duration_minutes']?.toString() ?? '0');
+    final locationController = TextEditingController(text: session['location']?.toString() ?? '');
     String? selectedModuleId = initialSelectedModule;
 
     showDialog(
@@ -220,7 +208,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         isExpanded: true,
                         hint: const Text('Add/Change Tag...'),
                         value: selectedModuleId,
-                        items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name']))).toList(),
+                        items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name'].toString()))).toList(),
                         onChanged: (val) => setModalState(() => selectedModuleId = val),
                       ),
                     ),
@@ -236,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               TextButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  _deleteSession(session['id']);
+                  _deleteSession(sessionId);
                 },
                 child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
               ),
@@ -248,10 +236,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   if (taskNameController.text.isNotEmpty && newDuration > 0) {
                     String finalSubject = taskNameController.text.trim();
                     if (selectedModuleId != null) {
-                       String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'];
+                       String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'].toString();
                        finalSubject = '$finalSubject ($modName)';
                     }
-                    _updateSession(session['id'], finalSubject, newDuration, locationController.text);
+                    _updateSession(sessionId, finalSubject, newDuration, locationController.text);
                     Navigator.pop(ctx);
                   }
                 },
@@ -264,7 +252,80 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
-  // --- UI BUILDERS ---
+  Widget _buildCalendarGrid() {
+    int daysInMonth = DateUtils.getDaysInMonth(_now.year, _now.month);
+    int firstWeekdayOfMonth = DateTime(_now.year, _now.month, 1).weekday;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("${_getMonthName(_now.month)} ${_now.year}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("${_activeDaysInMonth.length} Days Active", style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.w600, fontSize: 13))
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: _weekdays.map((day) => Text(day, style: const TextStyle(color: Colors.black38, fontWeight: FontWeight.bold, fontSize: 12))).toList(),
+              ),
+              const SizedBox(height: 8),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: daysInMonth + (firstWeekdayOfMonth - 1),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 8, crossAxisSpacing: 8),
+                itemBuilder: (context, index) {
+                  int dayOffset = index - (firstWeekdayOfMonth - 1);
+                  if (dayOffset < 0) return const SizedBox.shrink();
+
+                  int dayNumber = dayOffset + 1;
+                  bool isActive = _activeDaysInMonth.contains(dayNumber);
+                  bool isToday = dayNumber == _now.day;
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: isActive ? const Color(0xff5732a3) : Colors.grey[100],
+                      shape: BoxShape.circle,
+                      border: isToday ? Border.all(color: const Color(0xff5732a3), width: 2) : null,
+                    ),
+                    child: Center(
+                      child: Text(
+                        "$dayNumber",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isActive || isToday ? FontWeight.bold : FontWeight.normal,
+                          color: isActive ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _getMonthName(int month) {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return months[month - 1];
+  }
+
   @override
   Widget build(BuildContext context) {
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
@@ -277,10 +338,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         elevation: 0,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
+          ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Jeevan's Top Hero Section
                 Container(
                   width: double.infinity,
                   color: const Color(0xff5732a3),
@@ -332,7 +392,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   ),
                 ),
                 
-                // Tabs
                 Container(
                   color: Colors.white,
                   child: TabBar(
@@ -348,20 +407,34 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   ),
                 ),
                 
-                // Your Interactive Calendar & Log Views
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
                     children: [
-                      _buildInteractiveCalendarTab(), 
-                      
+                      _buildCalendarGrid(), 
                       _myHistory.isEmpty   
-                          ? const Center(child: Text('No study history recorded.', style: TextStyle(color: Colors.grey)))
+                          ? const Center(child: Text('No study history recorded.'))
                           : ListView.builder(
                               padding: const EdgeInsets.all(16),
                               itemCount: _myHistory.length,
                               itemBuilder: (context, index) {
-                                return _buildActivityItem(_myHistory[index]);
+                                final session = _myHistory[index];
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(color: Colors.black12),
+                                  ),
+                                  child: ListTile(
+                                    leading: const Icon(Icons.history, color: Colors.grey),
+                                    title: Text(session['subject']),
+                                    subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
+                                    trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                                    // NEW: Restored your onTap functionality here!
+                                    onTap: () => _showEditDialog(session),
+                                  ),
+                                );
                               },
                             ),
                     ],
@@ -369,66 +442,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 )
               ],
             ),
-    );
-  }
-
-  // Uses your interactive table_calendar logic instead of the static grid
-  Widget _buildInteractiveCalendarTab() {
-    final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
-
-    return Column(
-      children: [
-        Card(
-          margin: const EdgeInsets.all(16),
-          elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: TableCalendar(
-            firstDay: DateTime.utc(2023, 1, 1),
-            lastDay: DateTime.utc(2030, 12, 31),
-            focusedDay: _focusedDay,
-            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-            onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-              });
-            },
-            eventLoader: _getEventsForDay,
-            calendarStyle: CalendarStyle(
-              todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withOpacity(0.3), shape: BoxShape.circle),
-              selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
-              markerDecoration: const BoxDecoration(color: Color(0xffb73229), shape: BoxShape.circle),
-            ),
-            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
-          ),
-        ),
-        Expanded(
-          child: selectedEvents.isEmpty
-              ? const Center(child: Text("No sessions on this day.", style: TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: selectedEvents.length,
-                  itemBuilder: (context, index) {
-                    return _buildActivityItem(selectedEvents[index]);
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  // Reusable card for both the Calendar tab and History Log tab
-  Widget _buildActivityItem(Map<String, dynamic> session) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-      child: ListTile(
-        leading: const Icon(Icons.history, color: Colors.grey),
-        title: Text(session['subject'] ?? 'Unknown Task', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
-        trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-        onTap: () => _showEditDialog(session), // Triggers your edit logic!
-      ),
     );
   }
 }
