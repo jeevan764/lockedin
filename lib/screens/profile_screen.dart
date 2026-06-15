@@ -1,6 +1,7 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dashboard_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -9,417 +10,318 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
-  String _username = "Loading...";
-  String _email = "Loading...";
-  bool _isLoadingProfile = true;
-  
-  List<dynamic> _recentSessions = [];
-  bool _isLoadingSessions = true;
+  late TabController _tabController;
 
-  int _followersCount = 0;
+  List<dynamic> _myHistory = [];
+  bool _isLoading = true;
+  int _totalXp = 0;
+  int _currentStreak = 0;
+  String _username = "Loading...";
+  int _followerCount = 0;
   int _followingCount = 0;
+  Set<int> _activeDaysInMonth = {}; 
+
+  final List<String> _weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  final DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _fetchUserProfile();
-    _fetchRecentSessions();
-    _fetchSocialMetrics(); 
+    _tabController = TabController(length: 2, vsync: this);
+    _loadProfileDetails();
+    syncProfileNotifier.addListener(_loadProfileDetails);
   }
 
-  Future<void> _fetchUserProfile() async {
+  @override
+  void dispose() {
+    _tabController.dispose();
+    syncProfileNotifier.removeListener(_loadProfileDetails);
+    super.dispose();
+  }
+
+  Future<void> _loadProfileDetails() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
     try {
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final data = await _supabase.from('profiles').select('username, email').eq('id', user.id).single();
+      final currentUserId = _supabase.auth.currentUser?.id;
+      if (currentUserId == null) return;
+
+      // 1. Fetch Profile Info (Username)
+      final profileData = await _supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', currentUserId)
+          .maybeSingle();
+      
+      if (profileData != null) {
+        _username = profileData['username'] ?? 'User';
+      }
+
+      // 2. Fetch Social Metrics (Followers & Following counts)
+      final followersData = await _supabase.from('follows').select('id').eq('following_id', currentUserId);
+      final followingData = await _supabase.from('follows').select('id').eq('follower_id', currentUserId);
+
+      // 3. Fetch Study History Rows
+      final response = await _supabase
+          .from('study_sessions')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('created_at', ascending: false);
+
+      int xpCounter = 0;
+      Set<String> uniqueDates = {};
+      Set<int> daysInMonth = {};
+
+      for (var row in response) {
+        xpCounter += (row['xp_earned'] as num).toInt();
+        
+        if (row['created_at'] != null) {
+          DateTime date = DateTime.parse(row['created_at']).toLocal();
+          String dateString = "${date.year}-${date.month}-${date.day}";
+          uniqueDates.add(dateString);
+
+          if (date.month == _now.month && date.year == _now.year) {
+            daysInMonth.add(date.day);
+          }
+        }
+      }
+
+      if (mounted) {
         setState(() {
-          _username = data['username'] ?? 'LockedIn User';
-          _email = data['email'] ?? user.email ?? '';
-          _isLoadingProfile = false;
+          _myHistory = response;
+          _totalXp = xpCounter;
+          _followerCount = followersData.length;
+          _followingCount = followingData.length;
+          _activeDaysInMonth = daysInMonth;
+          _currentStreak = _calculateStreak(uniqueDates);
+          _isLoading = false;
         });
       }
     } catch (e) {
-      setState(() {
-        _username = "Academic Athlete";
-        _email = _supabase.auth.currentUser?.email ?? "student@u.nus.edu";
-        _isLoadingProfile = false;
-      });
+      print('Profile metrics load issue: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // Updates the username string attribute inside public.profiles table
-  Future<void> _updateUsername(String newUsername) async {
-    if (newUsername.trim().isEmpty) return;
-    
-    setState(() => _isLoadingProfile = true);
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
+  int _calculateStreak(Set<String> uniqueDates) {
+    int streak = 0;
+    DateTime checkDate = DateTime.now();
 
-      await _supabase
-          .from('profiles')
-          .update({'username': newUsername.trim()})
-          .eq('id', user.id);
-
-      setState(() {
-        _username = newUsername.trim();
-        _isLoadingProfile = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username updated successfully!')),
-      );
-    } catch (e) {
-      print('Profile save exception: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not update username. Try again.')),
-      );
-      setState(() => _isLoadingProfile = false);
+    while (true) {
+      String checkStr = "${checkDate.year}-${checkDate.month}-${checkDate.day}";
+      if (uniqueDates.contains(checkStr)) {
+        streak++;
+        checkDate = checkDate.subtract(const Duration(days: 1));
+      } else {
+        if (streak == 0) {
+          DateTime yesterday = DateTime.now().subtract(const Duration(days: 1));
+          String yestStr = "${yesterday.year}-${yesterday.month}-${yesterday.day}";
+          if (uniqueDates.contains(yestStr)) {
+            checkDate = yesterday;
+            continue;
+          }
+        }
+        break;
+      }
     }
+    return streak;
   }
 
-  // Opens modal dialog context capturing new name profile parameters
-  void _showEditUsernameDialog() {
-    final editController = TextEditingController(text: _username);
+  Widget _buildCalendarGrid() {
+    int daysInMonth = DateUtils.getDaysInMonth(_now.year, _now.month);
+    int firstWeekdayOfMonth = DateTime(_now.year, _now.month, 1).weekday;
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Change Username', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: TextField(
-            controller: editController,
-            decoration: InputDecoration(
-              hintText: "Enter unique username",
-              filled: true,
-              fillColor: Colors.grey[100],
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            ),
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.black12),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff5732a3),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("${_getMonthName(_now.month)} ${_now.year}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("${_activeDaysInMonth.length} Days Active", style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.w600, fontSize: 13))
+                ],
               ),
-              onPressed: () {
-                Navigator.pop(context);
-                _updateUsername(editController.text);
-              },
-              child: const Text('Save', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: _weekdays.map((day) => Text(day, style: const TextStyle(color: Colors.black38, fontWeight: FontWeight.bold, fontSize: 12))).toList(),
+              ),
+              const SizedBox(height: 8),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: daysInMonth + (firstWeekdayOfMonth - 1),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 8, crossAxisSpacing: 8),
+                itemBuilder: (context, index) {
+                  int dayOffset = index - (firstWeekdayOfMonth - 1);
+                  if (dayOffset < 0) return const SizedBox.shrink();
+
+                  int dayNumber = dayOffset + 1;
+                  bool isActive = _activeDaysInMonth.contains(dayNumber);
+                  bool isToday = dayNumber == _now.day;
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: isActive ? const Color(0xff5732a3) : Colors.grey[100],
+                      shape: BoxShape.circle,
+                      border: isToday ? Border.all(color: const Color(0xff5732a3), width: 2) : null,
+                    ),
+                    child: Center(
+                      child: Text(
+                        "$dayNumber",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isActive || isToday ? FontWeight.bold : FontWeight.normal,
+                          color: isActive ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  Future<void> _fetchRecentSessions() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final response = await _supabase
-            .from('study_sessions')
-            .select()
-            .eq('user_id', user.id)
-            .order('created_at', ascending: false)
-            .limit(5);
-
-        setState(() {
-          _recentSessions = response;
-          _isLoadingSessions = false;
-        });
-      }
-    } catch (e) {
-      print('Error fetching personal sessions: $e');
-      setState(() => _isLoadingSessions = false);
-    }
-  }
-
-  Future<void> _fetchSocialMetrics() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
-
-      final List<dynamic> followersList = await _supabase.from('follows').select('id').eq('following_id', user.id);
-      final List<dynamic> followingList = await _supabase.from('follows').select('id').eq('follower_id', user.id);
-
-      setState(() {
-        _followersCount = followersList.length;
-        _followingCount = followingList.length;
-      });
-    } catch (e) {
-      print('Error parsing follower metrics: $e');
-    }
+  String _getMonthName(int month) {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return months[month - 1];
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingProfile) return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
+    final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        backgroundColor: const Color(0xfff8f9fa),
-        body: NestedScrollView(
-          headerSliverBuilder: (context, innerBoxIsScrolled) {
-            return [
-              SliverAppBar(
-                expandedHeight: 210.0, 
-                floating: false,
-                pinned: true,
-                backgroundColor: const Color(0xff5732a3), 
-                elevation: 0,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Container(
-                    padding: const EdgeInsets.only(top: 40.0), 
-                    color: const Color(0xff5732a3),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            const SizedBox(
-                              width: 84, height: 84,
-                              child: CircularProgressIndicator(
-                                value: 0.74, strokeWidth: 5,
-                                backgroundColor: Colors.white24, 
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white), 
-                              ),
-                            ),
-                            const CircleAvatar(
-                              radius: 35, 
-                              backgroundColor: Color(0xfff1edfa), 
-                              child: Icon(Icons.school, size: 32, color: Color(0xff5732a3))
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        
-                        // EDITABLE USERNAME ROW DISPLAY BLOCK
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const SizedBox(width: 32), // Balancing spacing trick
-                            Text(
-                              _username, 
-                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)
-                            ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              icon: const Icon(Icons.edit, size: 16, color: Colors.white70),
-                              onPressed: _showEditUsernameDialog,
-                            ),
-                          ],
-                        ),
-                        Text(
-                          _email, 
-                          style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.7), fontWeight: FontWeight.w400)
-                        ),
-                        const SizedBox(height: 10),
-                        
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '$_followingCount',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Following',
-                              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-                            ),
-                            const SizedBox(width: 20),
-                            Text(
-                              '$_followersCount',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Followers',
-                              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _SliverAppBarDelegate(
-                  const TabBar(
-                    labelColor: Color(0xff5732a3),
-                    unselectedLabelColor: Colors.black38,
-                    indicatorColor: Color(0xff5732a3),
-                    indicatorSize: TabBarIndicatorSize.label,
-                    tabs: [
-                      Tab(icon: Icon(Icons.analytics_outlined), text: "Overview"),
-                      Tab(icon: Icon(Icons.calendar_month_outlined), text: "Calendar"),
-                    ],
-                  ),
-                ),
-              ),
-            ];
-          },
-          body: TabBarView(
-            children: [
-              _buildOverviewTab(),
-              _buildCalendarTab(),
-            ],
-          ),
-        ),
+    return Scaffold(
+      backgroundColor: const Color(0xfff8f9fa),
+      appBar: AppBar(
+        title: const Text('My Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xff5732a3),
+        elevation: 0,
       ),
-    );
-  }
-
-  Widget _buildOverviewTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Performance Analytics', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.4,
-            children: [
-              _buildMetricCard('Current Streak', '12 Days', Icons.local_fire_department, Colors.orange),
-              _buildMetricCard('Focus Hours', '42.5 hrs', Icons.timer_outlined, Colors.blue),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Recent Sessions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          
-          if (_isLoadingSessions)
-            const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          else if (_recentSessions.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Text('No logged sessions yet. Time to get to work!', style: TextStyle(color: Colors.grey)),
-            )
-          else
-            ..._recentSessions.map((session) {
-              final subject = session['subject'] ?? 'Unknown';
-              final durationMins = session['duration_minutes'] ?? 0;
-              final durationStr = durationMins >= 60 ? '${(durationMins / 60).toStringAsFixed(1)} hrs' : '$durationMins mins';
-              
-              String timeAgo = 'Recently';
-              if (session['created_at'] != null) {
-                final diff = DateTime.now().difference(DateTime.parse(session['created_at']));
-                if (diff.inDays > 1) timeAgo = '${diff.inDays} days ago';
-                else if (diff.inDays == 1) timeAgo = 'Yesterday';
-                else if (diff.inHours > 0) timeAgo = '${diff.inHours} hrs ago';
-                else if (diff.inMinutes > 0) timeAgo = '${diff.inMinutes} mins ago';
-                else timeAgo = 'Just now';
-              }
-
-              return _buildActivityItem(subject, durationStr, timeAgo);
-            }),
-
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity, height: 48,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                await _supabase.auth.signOut();
-                if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-              },
-              icon: const Icon(Icons.logout, color: Color(0xffb73229), size: 18),
-              label: const Text('Sign Out', style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold)),
-              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xffb73229))),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCalendarTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        children: [
-          Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.black)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // Top Hero Section
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xff5732a3),
+                  padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
+                  child: Column(
                     children: [
-                      Text('June 2026', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Icon(Icons.chevron_right, color: Colors.black54),
+                      const CircleAvatar(radius: 36, backgroundColor: Colors.white, child: Icon(Icons.person, size: 40, color: Color(0xff5732a3))),
+                      const SizedBox(height: 10),
+                      Text('@$_username', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(height: 12),
+                      
+                      // Follower details count strip
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('$_followerCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          const Text(' Followers', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          const SizedBox(width: 24),
+                          Text('$_followingCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          const Text(' Following', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Column(
+                            children: [
+                              Text('$_totalXp', style: const TextStyle(color: Colors.greenAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                              const Text('TOTAL XP', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                          Container(width: 1, height: 24, color: Colors.white24),
+                          Column(
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.local_fire_department, color: Colors.orangeAccent, size: 20),
+                                  Text('$_currentStreak', style: const TextStyle(color: Colors.orangeAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              const Text('DAY STREAK', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  Container(
-                    height: 200,
-                    color: Colors.black.withOpacity(0.03),
-                    child: const Center(child: Text('Calendar Grid Injects Here', style: TextStyle(color: Colors.black38))),
+                ),
+                
+                // Navigation segment selector
+                Container(
+                  color: Colors.white,
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: const Color(0xff5732a3),
+                    unselectedLabelColor: Colors.black54,
+                    indicatorColor: const Color(0xff5732a3),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    tabs: const [
+                      Tab(icon: Icon(Icons.calendar_month), text: "Calendar"),
+                      Tab(icon: Icon(Icons.history), text: "History Log"),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                
+                // Displays active screen content panels
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildCalendarGrid(), 
+                      _myHistory.isEmpty   
+                          ? const Center(child: Text('No study history recorded.'))
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _myHistory.length,
+                              itemBuilder: (context, index) {
+                                final session = _myHistory[index];
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(color: Colors.black12),
+                                  ),
+                                  child: ListTile(
+                                    leading: const Icon(Icons.history, color: Colors.grey),
+                                    title: Text(session['subject']),
+                                    subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
+                                    trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                                  ),
+                                );
+                              },
+                            ),
+                    ],
+                  ),
+                )
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
-
-  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      elevation: 0, color: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black)),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(title, style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.w600)), Icon(icon, color: color, size: 18)]),
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _buildActivityItem(String title, String duration, String timeAgo) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8), elevation: 0, color: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black)),
-      child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.history_edu, color: Color(0xff5732a3)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(duration),
-        trailing: Text(timeAgo, style: const TextStyle(fontSize: 11, color: Colors.black38)),
-      ),
-    );
-  }
-}
-
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
-  _SliverAppBarDelegate(this._tabBar);
-  final TabBar _tabBar;
-
-  @override double get minExtent => _tabBar.preferredSize.height;
-  @override double get maxExtent => _tabBar.preferredSize.height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(color: const Color(0xfff8f9fa), child: _tabBar);
-  }
-
-  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
 }

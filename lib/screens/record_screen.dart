@@ -1,6 +1,7 @@
 // lib/screens/record_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dashboard_screen.dart';
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
@@ -40,17 +41,18 @@ class _RecordScreenState extends State<RecordScreen> {
 
     try {
       final user = _supabase.auth.currentUser;
-      if (user == null) throw Exception('User not logged in');
+      if (user == null) throw Exception('User session missing');
 
       final durationMins = int.tryParse(durationText) ?? 0;
-      final xp = durationMins * 2; // Basic MVP gamification logic: 2 XP per minute
+      final xp = durationMins * 2; 
 
       await _supabase.from('study_sessions').insert({
         'user_id': user.id,
         'subject': subject,
         'duration_minutes': durationMins,
-        'location': location.isEmpty ? 'NUS Central Library' : location, // Default location
+        'location': location.isEmpty ? 'NUS Central Library' : location, 
         'xp_earned': xp,
+        'created_at': DateTime.now().toIso8601String(),
       });
 
       if (mounted) {
@@ -60,6 +62,10 @@ class _RecordScreenState extends State<RecordScreen> {
         _subjectController.clear();
         _durationController.clear();
         _locationController.clear();
+
+        // Send instant notification broadcast payload
+        syncFeedNotifier.value++;
+        syncProfileNotifier.value++;
       }
     } catch (e) {
       if (mounted) {
@@ -92,7 +98,14 @@ class _RecordScreenState extends State<RecordScreen> {
                 hintText: 'e.g. Linear Algebra (MA1512)',
                 filled: true,
                 fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
               ),
             ),
             const SizedBox(height: 20),
@@ -106,7 +119,14 @@ class _RecordScreenState extends State<RecordScreen> {
                 hintText: 'e.g. 120',
                 filled: true,
                 fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
               ),
             ),
             const SizedBox(height: 20),
@@ -119,7 +139,14 @@ class _RecordScreenState extends State<RecordScreen> {
                 hintText: 'e.g. UTown Starbucks',
                 filled: true,
                 fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black12, width: 1.0),
+                ),
               ),
             ),
             const SizedBox(height: 40),
