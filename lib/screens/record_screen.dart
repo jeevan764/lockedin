@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dashboard_screen.dart'; // Imports Jeevan's sync notifiers
+import 'dashboard_screen.dart'; 
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
@@ -324,7 +324,7 @@ class _RecordScreenState extends State<RecordScreen> {
             border: Border.all(color: _isRunning ? const Color(0xffb73229) : const Color(0xff5732a3), width: 8),
           ),
           child: Center(
-            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 35, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
           ),
         ),
         const SizedBox(height: 24),
