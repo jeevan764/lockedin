@@ -110,7 +110,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         shrinkWrap: true,
                         itemCount: comments.length,
                         itemBuilder: (context, index) {
-                          final c = comments[index];
+                          final c = comments[index] as Map<String, dynamic>;
                           final author = c['profiles']?['username'] ?? 'User';
                           return ListTile(
                             dense: true,
@@ -247,6 +247,49 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  // --- NEW: TIME AGO LOGIC ---
+  String _getTimeAgo(String? timestamp) {
+    if (timestamp == null) return 'Recently completed';
+    
+    try {
+      final date = DateTime.parse(timestamp).toLocal();
+      final diff = DateTime.now().difference(date);
+      
+      if (diff.inDays > 7) {
+         return '${date.day}/${date.month}/${date.year}';
+      } else if (diff.inDays > 1) {
+        return '${diff.inDays} days ago';
+      } else if (diff.inDays == 1) {
+        return 'Yesterday';
+      } else if (diff.inHours > 0) {
+        return '${diff.inHours} ${diff.inHours == 1 ? 'hr' : 'hrs'} ago';
+      } else if (diff.inMinutes > 0) {
+        return '${diff.inMinutes} ${diff.inMinutes == 1 ? 'min' : 'mins'} ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      return 'Recently completed';
+    }
+  }
+
+  // --- UI HELPERS FOR THE CARD ---
+  Widget _buildStatColumn(String label, String value) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12), textAlign: TextAlign.center),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = _supabase.auth.currentUser?.id;
@@ -261,43 +304,124 @@ class _FeedScreenState extends State<FeedScreen> {
       body: RefreshIndicator(
         onRefresh: _fetchSocialActivityFeed,
         child: _isLoadingFeed
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
             : _feedItems.isEmpty
-                ? const Center(child: Text('Feed is quiet. Follow friends to see their data!'))
+                ? const Center(child: Text('Feed is quiet. Follow friends to see their data!', style: TextStyle(color: Colors.grey)))
                 : ListView.builder(
                     padding: const EdgeInsets.all(16),
                     itemCount: _feedItems.length,
                     itemBuilder: (context, index) {
-                      final item = _feedItems[index];
+                      
+                      final item = _feedItems[index] as Map<String, dynamic>;
                       final username = item['profiles']?['username'] ?? 'Scholar';
                       final List<dynamic> likes = item['session_likes'] ?? [];
                       final List<dynamic> comments = item['session_comments'] ?? [];
                       final isLiked = likes.any((l) => l['user_id'] == currentUserId);
 
+                      final subjectFull = item['subject']?.toString() ?? 'Unknown';
+                      final durationMins = item['duration_minutes']?.toString() ?? '0';
+                      final location = item['location']?.toString() ?? 'Campus';
+                      final xp = item['xp_earned']?.toString() ?? '0';
+                      
+                      // DYNAMIC TIME FETCH
+                      final timeAgoString = _getTimeAgo(item['created_at']?.toString());
+
                       return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 1,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 6),
-                              Text("Studied ${item['subject']} for ${item['duration_minutes']} mins at ${item['location']}"),
+                              
+                              // 1. Header: Avatar & Username
+                              Row(
+                                children: [
+                                  const CircleAvatar(
+                                    backgroundColor: Color(0xff3f6b8e),
+                                    child: Icon(Icons.person, color: Colors.white),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(username, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+                                      // FIXED: Now uses dynamic time ago
+                                      Text(timeAgoString, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+
+                              // 2. Main Title
+                              Text(
+                                '$subjectFull Session',
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // 3. Location Circle
+                              Center(
+                                child: Container(
+                                  height: 80,
+                                  width: 80,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xff5732a3), width: 2),
+                                  ),
+                                  child: Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text(
+                                        location,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold, fontSize: 11),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
                               const Divider(),
+
+                              // 4. Stats Row
+                              Row(
+                                children: [
+                                  Expanded(child: _buildStatColumn('Duration', '${durationMins}m')),
+                                  Container(height: 40, width: 1, color: Colors.grey[300]),
+                                  Expanded(child: _buildStatColumn('Subject', subjectFull)),
+                                ],
+                              ),
+                              const Divider(),
+
+                              // 5. XP Row
+                              Row(
+                                children: [
+                                  Expanded(child: _buildStatColumn('XP Earned', '+$xp XP')),
+                                ],
+                              ),
+                              const Divider(),
+
+                              // 6. Social Buttons
                               Row(
                                 children: [
                                   IconButton(
                                     icon: Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? Colors.red : Colors.grey), 
                                     onPressed: () => _toggleLike(item['id'].toString(), isLiked),
                                   ),
-                                  Text('${likes.length}'),
-                                  const SizedBox(width: 16),
+                                  Text('${likes.length}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
+                                  const SizedBox(width: 24),
                                   IconButton(
-                                    icon: const Icon(Icons.comment_outlined), 
+                                    icon: const Icon(Icons.comment_outlined, color: Colors.grey), 
                                     onPressed: () => _showCommentsModal(item['id'].toString(), comments),
                                   ),
-                                  Text('${comments.length}'),
+                                  Text('${comments.length}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
                                 ],
                               )
                             ],
