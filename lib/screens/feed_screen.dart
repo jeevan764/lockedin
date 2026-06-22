@@ -393,7 +393,7 @@ class _FeedScreenState extends State<FeedScreen> {
                               // 4. Stats Row
                               Row(
                                 children: [
-                                  Expanded(child: _buildStatColumn('Duration', '${durationMins}m')),
+                                  Expanded(child: _buildStatColumn('Duration', '${durationMins}min')),
                                   Container(height: 40, width: 1, color: Colors.grey[300]),
                                   Expanded(child: _buildStatColumn('Subject', subjectFull)),
                                 ],
