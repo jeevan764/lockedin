@@ -247,30 +247,50 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // --- NEW: TIME AGO LOGIC ---
+  // --- TIME AND DATE FORMATTERS ---
+  String _getExactDate(String? timestamp) {
+    if (timestamp == null) return '';
+    try {
+      final date = DateTime.parse(timestamp).toLocal();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[date.month - 1]} ${date.day}';
+    } catch (e) {
+      return '';
+    }
+  }
+
   String _getTimeAgo(String? timestamp) {
-    if (timestamp == null) return 'Recently completed';
-    
+    if (timestamp == null) return 'Recently';
     try {
       final date = DateTime.parse(timestamp).toLocal();
       final diff = DateTime.now().difference(date);
       
-      if (diff.inDays > 7) {
-         return '${date.day}/${date.month}/${date.year}';
-      } else if (diff.inDays > 1) {
-        return '${diff.inDays} days ago';
-      } else if (diff.inDays == 1) {
-        return 'Yesterday';
-      } else if (diff.inHours > 0) {
-        return '${diff.inHours} ${diff.inHours == 1 ? 'hr' : 'hrs'} ago';
-      } else if (diff.inMinutes > 0) {
-        return '${diff.inMinutes} ${diff.inMinutes == 1 ? 'min' : 'mins'} ago';
-      } else {
-        return 'Just now';
-      }
+      if (diff.inDays > 7) return '${date.year}';
+      if (diff.inDays > 1) return '${diff.inDays} days ago';
+      if (diff.inDays == 1) return 'Yesterday';
+      if (diff.inHours > 0) return '${diff.inHours} ${diff.inHours == 1 ? 'hr' : 'hrs'} ago';
+      if (diff.inMinutes > 0) return '${diff.inMinutes} ${diff.inMinutes == 1 ? 'min' : 'mins'} ago';
+      return 'Just now';
     } catch (e) {
-      return 'Recently completed';
+      return 'Recently';
     }
+  }
+
+  // --- DYNAMIC COLOR GENERATOR FOR TAGS ---
+  Color _getColorForModule(String moduleName) {
+    final colors = [
+      const Color(0xff5732a3), // Primary Purple
+      Colors.blueAccent, 
+      Colors.teal,
+      Colors.orange, 
+      Colors.pinkAccent, 
+      Colors.redAccent,
+      Colors.indigo, 
+      const Color(0xff2d4059)
+    ];
+    // Uses the string's hashcode to always pick the same color for the same module code
+    int hash = moduleName.hashCode;
+    return colors[hash.abs() % colors.length];
   }
 
   // --- UI HELPERS FOR THE CARD ---
@@ -323,8 +343,19 @@ class _FeedScreenState extends State<FeedScreen> {
                       final location = item['location']?.toString() ?? 'Campus';
                       final xp = item['xp_earned']?.toString() ?? '0';
                       
-                      // DYNAMIC TIME FETCH
-                      final timeAgoString = _getTimeAgo(item['created_at']?.toString());
+                      // STRING PARSING: Splits "Tutorial 1 (BT1101)" into task and tag
+                      String taskName = subjectFull;
+                      String moduleName = '';
+                      if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
+                        int openParen = subjectFull.lastIndexOf('(');
+                        taskName = subjectFull.substring(0, openParen).trim();
+                        moduleName = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
+                      }
+                      
+                      // DATE FORMATTING
+                      final exactDate = _getExactDate(item['created_at']?.toString());
+                      final timeAgo = _getTimeAgo(item['created_at']?.toString());
+                      final dateDisplay = exactDate.isNotEmpty ? '$exactDate • $timeAgo' : timeAgo;
 
                       return Card(
                         elevation: 1,
@@ -337,7 +368,7 @@ class _FeedScreenState extends State<FeedScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               
-                              // 1. Header: Avatar & Username
+                              // 1. Header: Avatar, Username, and Explicit Date
                               Row(
                                 children: [
                                   const CircleAvatar(
@@ -349,18 +380,43 @@ class _FeedScreenState extends State<FeedScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(username, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                                      // FIXED: Now uses dynamic time ago
-                                      Text(timeAgoString, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                      Text(dateDisplay, style: const TextStyle(color: Colors.grey, fontSize: 12)),
                                     ],
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16),
 
-                              // 2. Main Title
-                              Text(
-                                '$subjectFull Session',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                              // 2. Main Title & Dynamic Colored Tag
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '$taskName Session',
+                                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                                    ),
+                                  ),
+                                  if (moduleName.isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: _getColorForModule(moduleName).withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: _getColorForModule(moduleName), width: 1),
+                                      ),
+                                      child: Text(
+                                        moduleName,
+                                        style: TextStyle(
+                                          color: _getColorForModule(moduleName), 
+                                          fontWeight: FontWeight.bold, 
+                                          fontSize: 12
+                                        ),
+                                      ),
+                                    ),
+                                  ]
+                                ],
                               ),
                               const SizedBox(height: 16),
 
@@ -390,12 +446,12 @@ class _FeedScreenState extends State<FeedScreen> {
                               const SizedBox(height: 16),
                               const Divider(),
 
-                              // 4. Stats Row
+                              // 4. Stats Row (Now only shows the Task Name without the bracketed module)
                               Row(
                                 children: [
                                   Expanded(child: _buildStatColumn('Duration', '${durationMins}min')),
                                   Container(height: 40, width: 1, color: Colors.grey[300]),
-                                  Expanded(child: _buildStatColumn('Subject', subjectFull)),
+                                  Expanded(child: _buildStatColumn('Subject', taskName)),
                                 ],
                               ),
                               const Divider(),

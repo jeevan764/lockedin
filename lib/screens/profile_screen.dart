@@ -1,7 +1,8 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dashboard_screen.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'dashboard_screen.dart'; // Imports Jeevan's syncProfileNotifier
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -14,25 +15,31 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   final _supabase = Supabase.instance.client;
   late TabController _tabController;
 
+  // Merged State Variables
   List<dynamic> _myHistory = [];
-  List<Map<String, dynamic>> _modules = []; // NEW: Tag memory
+  List<Map<String, dynamic>> _modules = []; 
   bool _isLoading = true;
+  
   int _totalXp = 0;
   int _currentStreak = 0;
   String _username = "Loading...";
   int _followerCount = 0;
   int _followingCount = 0;
-  Set<int> _activeDaysInMonth = {}; 
 
-  final List<String> _weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  final DateTime _now = DateTime.now();
+  // Calendar Variables
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+  Map<DateTime, List<dynamic>> _sessionsByDay = {};
 
   @override
   void initState() {
     super.initState();
+    _selectedDay = _focusedDay;
     _tabController = TabController(length: 2, vsync: this);
+    
     _loadProfileDetails();
-    _fetchModules(); // NEW: Grabs tags on load
+    _fetchModules();
+    
     syncProfileNotifier.addListener(_loadProfileDetails);
   }
 
@@ -43,18 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     super.dispose();
   }
 
-  Future<void> _fetchModules() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
-        if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
-      }
-    } catch (e) {
-      print('Error fetching modules: $e');
-    }
-  }
-
+  // --- CORE DATA FETCHING ---
   Future<void> _loadProfileDetails() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -77,19 +73,21 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
       int xpCounter = 0;
       Set<String> uniqueDates = {};
-      Set<int> daysInMonth = {};
+      Map<DateTime, List<dynamic>> groupedSessions = {};
 
-      for (var row in response) {
-        xpCounter += (row['xp_earned'] as num).toInt();
+      for (var rawRow in response) {
+        final row = rawRow as Map<String, dynamic>; 
+        
+        xpCounter += (row['xp_earned'] as num?)?.toInt() ?? 0;
         
         if (row['created_at'] != null) {
-          DateTime date = DateTime.parse(row['created_at']).toLocal();
-          String dateString = "${date.year}-${date.month}-${date.day}";
-          uniqueDates.add(dateString);
+          DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
+          DateTime cleanDate = DateTime(date.year, date.month, date.day);
 
-          if (date.month == _now.month && date.year == _now.year) {
-            daysInMonth.add(date.day);
-          }
+          uniqueDates.add("${date.year}-${date.month}-${date.day}");
+
+          if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
+          groupedSessions[cleanDate]!.add(row);
         }
       }
 
@@ -99,7 +97,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           _totalXp = xpCounter;
           _followerCount = followersData.length;
           _followingCount = followingData.length;
-          _activeDaysInMonth = daysInMonth;
+          _sessionsByDay = groupedSessions;
           _currentStreak = _calculateStreak(uniqueDates);
           _isLoading = false;
         });
@@ -107,6 +105,18 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     } catch (e) {
       print('Profile metrics load issue: $e');
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchModules() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
+        if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
+      }
+    } catch (e) {
+      print('Error fetching modules: $e');
     }
   }
 
@@ -134,44 +144,60 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return streak;
   }
 
-  // --- NEW: EDIT & DELETE ACTIONS ---
-  Future<void> _updateSession(String id, String subject, int duration, String location) async {
+  List<dynamic> _getEventsForDay(DateTime day) {
+    DateTime cleanDay = DateTime(day.year, day.month, day.day);
+    return _sessionsByDay[cleanDay] ?? [];
+  }
+
+  // --- FIXED: EDIT & DELETE LOGIC WITH EXPLICIT AWAIT AND SELECT ---
+  Future<void> _updateSession(dynamic id, String subject, int duration, String location) async {
     try {
-      await _supabase.from('study_sessions').update({
+      // The .select() forces the database to return the updated row as proof
+      final response = await _supabase.from('study_sessions').update({
         'subject': subject,
         'duration_minutes': duration,
         'location': location,
         'xp_earned': duration * 2,
-      }).eq('id', id);
+      }).eq('id', id).select();
       
-      _loadProfileDetails(); 
-      syncFeedNotifier.value++; // Ensure the social feed updates too!
+      // If the array is empty, the database silently blocked the edit!
+      if (response.isEmpty) {
+         throw Exception("Database blocked the update. Missing RLS Update policy!");
+      }
+      
+      await _loadProfileDetails(); // Force the app to wait for the fresh data
+      syncFeedNotifier.value++; 
+      
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating: $e'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
 
-  Future<void> _deleteSession(String id) async {
+  Future<void> _deleteSession(dynamic id) async {
     try {
-      await _supabase.from('study_sessions').delete().eq('id', id);
-      _loadProfileDetails(); 
+      final response = await _supabase.from('study_sessions').delete().eq('id', id).select();
+      
+      if (response.isEmpty) {
+         throw Exception("Database blocked the deletion. Missing RLS Delete policy!");
+      }
+
+      await _loadProfileDetails(); 
       syncFeedNotifier.value++;
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting: $e'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
 
   void _showEditDialog(dynamic rawSession) {
     final session = rawSession as Map<String, dynamic>;
-    final sessionId = session['id'].toString();
+    final sessionId = session['id']; // Fixed to avoid random UUID casting errors
     
     String rawSubject = session['subject']?.toString() ?? '';
     String initialTaskName = rawSubject;
     String? initialSelectedModule;
 
-    // Disassembles "Task (Module)" back into dropdown components
     if (rawSubject.contains('(') && rawSubject.endsWith(')')) {
       int openParen = rawSubject.lastIndexOf('(');
       initialTaskName = rawSubject.substring(0, openParen).trim();
@@ -222,16 +248,16 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ),
             actions: [
               TextButton(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(ctx);
-                  _deleteSession(sessionId);
+                  await _deleteSession(sessionId);
                 },
                 child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
               ),
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
-                onPressed: () {
+                onPressed: () async {
                   final newDuration = int.tryParse(durationController.text) ?? 0;
                   if (taskNameController.text.isNotEmpty && newDuration > 0) {
                     String finalSubject = taskNameController.text.trim();
@@ -239,8 +265,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                        String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'].toString();
                        finalSubject = '$finalSubject ($modName)';
                     }
-                    _updateSession(sessionId, finalSubject, newDuration, locationController.text);
-                    Navigator.pop(ctx);
+                    
+                    Navigator.pop(ctx); // Close dialog first
+                    await _updateSession(sessionId, finalSubject, newDuration, locationController.text); // Wait for the DB
                   }
                 },
                 child: const Text('Save'),
@@ -252,80 +279,18 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildCalendarGrid() {
-    int daysInMonth = DateUtils.getDaysInMonth(_now.year, _now.month);
-    int firstWeekdayOfMonth = DateTime(_now.year, _now.month, 1).weekday;
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("${_getMonthName(_now.month)} ${_now.year}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("${_activeDaysInMonth.length} Days Active", style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.w600, fontSize: 13))
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: _weekdays.map((day) => Text(day, style: const TextStyle(color: Colors.black38, fontWeight: FontWeight.bold, fontSize: 12))).toList(),
-              ),
-              const SizedBox(height: 8),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: daysInMonth + (firstWeekdayOfMonth - 1),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 8, crossAxisSpacing: 8),
-                itemBuilder: (context, index) {
-                  int dayOffset = index - (firstWeekdayOfMonth - 1);
-                  if (dayOffset < 0) return const SizedBox.shrink();
-
-                  int dayNumber = dayOffset + 1;
-                  bool isActive = _activeDaysInMonth.contains(dayNumber);
-                  bool isToday = dayNumber == _now.day;
-
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: isActive ? const Color(0xff5732a3) : Colors.grey[100],
-                      shape: BoxShape.circle,
-                      border: isToday ? Border.all(color: const Color(0xff5732a3), width: 2) : null,
-                    ),
-                    child: Center(
-                      child: Text(
-                        "$dayNumber",
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: isActive || isToday ? FontWeight.bold : FontWeight.normal,
-                          color: isActive ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+  // --- DYNAMIC COLOR GENERATOR (Ported from Feed Screen) ---
+  Color _getColorForModule(String moduleName) {
+    final colors = [
+      const Color(0xff5732a3), Colors.blueAccent, Colors.teal,
+      Colors.orange, Colors.pinkAccent, Colors.redAccent,
+      Colors.indigo, const Color(0xff2d4059)
+    ];
+    int hash = moduleName.hashCode;
+    return colors[hash.abs() % colors.length];
   }
 
-  String _getMonthName(int month) {
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    return months[month - 1];
-  }
-
+  // --- UI BUILDERS ---
   @override
   Widget build(BuildContext context) {
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
@@ -338,7 +303,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         elevation: 0,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
           : Column(
               children: [
                 Container(
@@ -411,30 +376,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   child: TabBarView(
                     controller: _tabController,
                     children: [
-                      _buildCalendarGrid(), 
+                      _buildInteractiveCalendarTab(), 
+                      
                       _myHistory.isEmpty   
-                          ? const Center(child: Text('No study history recorded.'))
+                          ? const Center(child: Text('No study history recorded.', style: TextStyle(color: Colors.grey)))
                           : ListView.builder(
                               padding: const EdgeInsets.all(16),
                               itemCount: _myHistory.length,
                               itemBuilder: (context, index) {
-                                final session = _myHistory[index];
-                                return Card(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    side: const BorderSide(color: Colors.black12),
-                                  ),
-                                  child: ListTile(
-                                    leading: const Icon(Icons.history, color: Colors.grey),
-                                    title: Text(session['subject']),
-                                    subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
-                                    trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                                    // NEW: Restored your onTap functionality here!
-                                    onTap: () => _showEditDialog(session),
-                                  ),
-                                );
+                                return _buildActivityItem(_myHistory[index]);
                               },
                             ),
                     ],
@@ -442,6 +392,106 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 )
               ],
             ),
+    );
+  }
+
+  Widget _buildInteractiveCalendarTab() {
+    final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
+
+    // 1. Wrapped the entire tab in a SingleChildScrollView so it can scroll on small screens
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          Card(
+            margin: const EdgeInsets.all(16),
+            elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: TableCalendar(
+              firstDay: DateTime.utc(2023, 1, 1),
+              lastDay: DateTime.utc(2030, 12, 31),
+              focusedDay: _focusedDay,
+              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              onDaySelected: (selectedDay, focusedDay) {
+                setState(() {
+                  _selectedDay = selectedDay;
+                  _focusedDay = focusedDay;
+                });
+              },
+              eventLoader: _getEventsForDay,
+              calendarStyle: CalendarStyle(
+                todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withOpacity(0.3), shape: BoxShape.circle),
+                selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
+                markerDecoration: const BoxDecoration(color: Color(0xffb73229), shape: BoxShape.circle),
+              ),
+              headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+            ),
+          ),
+          
+          // 2. Removed the "Expanded" widget and added shrinkWrap to the ListView
+          if (selectedEvents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(child: Text("No sessions on this day.", style: TextStyle(color: Colors.grey))),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true, // Tells the list to only take up as much space as it needs
+              physics: const NeverScrollableScrollPhysics(), // Disables inner scrolling so the outer SingleChildScrollView handles it
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: selectedEvents.length,
+              itemBuilder: (context, index) {
+                return _buildActivityItem(selectedEvents[index]);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  // --- UPGRADED: Colored Tag Styling Ported Over ---
+  Widget _buildActivityItem(dynamic rawSession) {
+    final session = rawSession as Map<String, dynamic>;
+    
+    final subjectFull = session['subject']?.toString() ?? 'Unknown Task';
+    
+    String taskName = subjectFull;
+    String moduleName = '';
+    
+    if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
+      int openParen = subjectFull.lastIndexOf('(');
+      taskName = subjectFull.substring(0, openParen).trim();
+      moduleName = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
+    }
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
+      child: ListTile(
+        leading: const Icon(Icons.history, color: Colors.grey),
+        title: Row(
+          children: [
+            Text(taskName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            if (moduleName.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _getColorForModule(moduleName).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: _getColorForModule(moduleName), width: 1),
+                ),
+                child: Text(
+                  moduleName, 
+                  style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 10)
+                ),
+              ),
+            ]
+          ]
+        ),
+        subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
+        trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+        onTap: () => _showEditDialog(session), 
+      ),
     );
   }
 }
