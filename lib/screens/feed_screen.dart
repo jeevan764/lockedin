@@ -446,12 +446,12 @@ class _FeedScreenState extends State<FeedScreen> {
                               const SizedBox(height: 16),
                               const Divider(),
 
-                              // 4. Stats Row (Now only shows the Task Name without the bracketed module)
+                              // 4. Stats Row
                               Row(
                                 children: [
                                   Expanded(child: _buildStatColumn('Duration', '${durationMins}min')),
                                   Container(height: 40, width: 1, color: Colors.grey[300]),
-                                  Expanded(child: _buildStatColumn('Subject', taskName)),
+                                  Expanded(child: _buildStatColumn('Subject', moduleName.isNotEmpty ? moduleName : taskName)),
                                 ],
                               ),
                               const Divider(),
