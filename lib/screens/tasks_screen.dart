@@ -1,42 +1,61 @@
 // lib/screens/tasks_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dashboard_screen.dart';
 
-// Live Database Data Models
 class DBTaskModule {
-  final String id;
+  final int id;
   final String name;
   final Color color;
-  List<DBTaskItem> tasks;
+  final List<DBTaskItem> tasks;
 
   DBTaskModule({required this.id, required this.name, required this.color, required this.tasks});
 
-  // Factory constructor converting database payloads into structured runtime objects
-  factory DBTaskModule.fromSupabase(Map<String, dynamic> map) {
-    final int colorVal = int.tryParse(map['color_hex'] ?? '0xff5732a3') ?? 0xff5732a3;
-    final List<dynamic> rawTasks = map['tasks'] ?? [];
+  factory DBTaskModule.fromSupabase(Map<String, dynamic> json) {
+    // Robustly handle parsing standard IDs from database rows
+    final int parsedId = int.tryParse(json['id'].toString()) ?? 0;
+
+    // Safely extract and normalize hex color format configurations
+    String hexColor = json['color_hex']?.toString() ?? '0xff5732a3';
+    hexColor = hexColor.replaceAll('#', '').trim();
     
+    // Add missing alpha components if the string arrives as a short hex code
+    if (hexColor.startsWith('0x')) {
+      hexColor = hexColor.substring(2);
+    }
+    if (hexColor.length == 6) {
+      hexColor = 'FF$hexColor'; // Prepend full opacity channel
+    }
+
+    int colorValue;
+    try {
+      colorValue = int.parse(hexColor, radix: 16);
+    } catch (_) {
+      colorValue = 0xff5732a3; // Reliable safety fallback value
+    }
+
+    List<dynamic> taskList = json['tasks'] ?? [];
     return DBTaskModule(
-      id: map['id'],
-      name: map['name'],
-      color: Color(colorVal),
-      tasks: rawTasks.map((t) => DBTaskItem.fromSupabase(t)).toList(),
+      id: parsedId,
+      name: json['name'] ?? 'General',
+      color: Color(colorValue),
+      tasks: taskList.map((t) => DBTaskItem.fromSupabase(t)).toList(),
     );
   }
 }
 
 class DBTaskItem {
-  final String id;
+  final int id;
   final String title;
-  bool isCompleted;
+  final bool isCompleted;
 
-  DBTaskItem({required this.id, required this.title, this.isCompleted = false});
+  DBTaskItem({required this.id, required this.title, required this.isCompleted});
 
-  factory DBTaskItem.fromSupabase(Map<String, dynamic> map) {
+  factory DBTaskItem.fromSupabase(Map<String, dynamic> json) {
     return DBTaskItem(
-      id: map['id'],
-      title: map['title'],
-      isCompleted: map['is_completed'] ?? false,
+      id: int.tryParse(json['id'].toString()) ?? 0, // Protected against explicit type mismatches
+      title: json['title'] ?? '',
+      isCompleted: json['is_completed'] ?? false,
     );
   }
 }
@@ -53,66 +72,80 @@ class _TasksScreenState extends State<TasksScreen> {
   List<DBTaskModule> _modules = [];
   bool _isFetching = true;
 
-  final List<Color> _colorPalette = [
-    const Color(0xff5732a3), Colors.blueAccent, Colors.teal, 
-    Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent
-  ];
-
   @override
   void initState() {
     super.initState();
     _loadUserWorkspace();
+    syncTasksNotifier.addListener(_loadUserWorkspace); // Listens for instant updates from RecordScreen
   }
 
-  // Read all modules and inner tasks belonging to the current user
+  @override
+  void dispose() {
+    syncTasksNotifier.removeListener(_loadUserWorkspace);
+    super.dispose();
+  }
+
   Future<void> _loadUserWorkspace() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
-
-      // Query fetches modules and filters out completed tasks in a single network pass
+      
+      // Removed the crashing .eq('tasks.is_completed', false) from PostgREST query.
+      // We pull modules and their tasks normally, keeping empty modules safe from vanishing.
       final List<dynamic> response = await _supabase
           .from('task_modules')
           .select('*, tasks(*)')
           .eq('user_id', user.id)
-          .eq('tasks.is_completed', false)
           .order('created_at', ascending: true);
-
-      setState(() {
-        _modules = response.map((data) => DBTaskModule.fromSupabase(data)).toList();
-        _isFetching = false;
-      });
+          
+      if (mounted) {
+        setState(() {
+          _modules = response.map((data) {
+            final baseModule = DBTaskModule.fromSupabase(data);
+            
+            // Filter out completed tasks locally in memory instead of crashing the database channel.
+            // This allows empty categories to remain completely visible.
+            final activeTasks = baseModule.tasks.where((t) => !t.isCompleted).toList();
+            
+            return DBTaskModule(
+              id: baseModule.id,
+              name: baseModule.name,
+              color: baseModule.color,
+              tasks: activeTasks,
+            );
+          }).toList();
+          
+          _isFetching = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isFetching = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load tasks: $e'), backgroundColor: Colors.redAccent),
-      );
+      if (mounted) {
+        setState(() => _isFetching = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load tasks: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
     }
   }
 
-  // Create a brand new folder tag in Supabase
   Future<void> _handleCreateModule(String name, Color color) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
-
-      // Convert Flutter Color instance back to a database string representation
+      
+      // Use standard hex string serialization format
       final String hexString = '0x${color.value.toRadixString(16)}';
-
       await _supabase.from('task_modules').insert({
         'user_id': user.id,
         'name': name,
         'color_hex': hexString,
       });
-
-      // Refresh frontend state to display the new module immediately
       _loadUserWorkspace();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error creating tag: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error creating tag: $e')));
     }
   }
 
-  // Append an objective task nested inside a module entry
   Future<void> _handleAddTask(DBTaskModule module, String title) async {
     try {
       await _supabase.from('tasks').insert({
@@ -120,168 +153,57 @@ class _TasksScreenState extends State<TasksScreen> {
         'title': title,
         'is_completed': false,
       });
-
       _loadUserWorkspace();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error adding task: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error adding task: $e')));
     }
   }
 
-  // Update a task status to completed and make it disappear
   Future<void> _handleCompleteTask(DBTaskModule module, DBTaskItem task) async {
-    setState(() {
-      task.isCompleted = true;
-    });
-
     try {
-      // Small functional animation pause window for interaction polish
-      await Future.delayed(const Duration(milliseconds: 250));
-
       await _supabase.from('tasks').update({'is_completed': true}).eq('id', task.id);
-
-      setState(() {
-        module.tasks.removeWhere((item) => item.id == task.id);
-      });
+      _loadUserWorkspace();
+      syncProfileNotifier.value++; // Adds completion events to Profile metric counters
     } catch (e) {
-      setState(() {
-        task.isCompleted = false; // Roll back on failure
-      });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Database link failed: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error closing task: $e')));
     }
   }
 
-  // Delete an entire subject tag container along with all its structural contents
-  Future<void> _handleDeleteModule(String moduleId) async {
+  Future<void> _handleDeleteModule(DBTaskModule module) async {
     try {
-      await _supabase.from('task_modules').delete().eq('id', moduleId);
-      setState(() {
-        _modules.removeWhere((m) => m.id == moduleId);
-      });
+      await _supabase.from('task_modules').delete().eq('id', module.id);
+      _loadUserWorkspace();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deletion failed: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot delete tag: $e')));
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text('Workspace Tasks', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xff5732a3),
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.folder_open_outlined, color: Colors.white),
-            onPressed: _showCreateModuleDialog,
-          ),
-        ],
-      ),
-      body: _isFetching
-          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          : _modules.isEmpty
-              ? const Center(child: Text('No active subjects. Tap the folder icon to add one!'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16.0),
-                  itemCount: _modules.length,
-                  itemBuilder: (context, index) {
-                    final module = _modules[index];
-
-                    return Card(
-                      elevation: 0,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: const BorderSide(color: Colors.black),
-                      ),
-                      child: Theme(
-                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          initiallyExpanded: true,
-                          leading: CircleAvatar(radius: 6, backgroundColor: module.color),
-                          title: Text(module.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.add_circle_outline, color: Colors.black54, size: 20),
-                                onPressed: () => _showAddTaskDialog(module),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                                onPressed: () => _confirmDeleteModule(module),
-                              ),
-                            ],
-                          ),
-                          children: module.tasks.isEmpty
-                              ? [
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 16.0),
-                                    child: Text('No tasks under this tag yet.', style: TextStyle(color: Colors.grey, fontSize: 13, fontStyle: FontStyle.italic)),
-                                  )
-                                ]
-                              : module.tasks.map((task) {
-                                  return ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 24.0),
-                                    leading: Checkbox(
-                                      activeColor: module.color,
-                                      value: task.isCompleted,
-                                      onChanged: (_) => _handleCompleteTask(module, task),
-                                    ),
-                                    title: Text(task.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-                                  );
-                                }).toList(),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-    );
-  }
-
-  void _confirmDeleteModule(DBTaskModule module) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Subject?', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('Permanently wipe out "${module.name}" and all tasks inside?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-          TextButton(
-            onPressed: () {
-              _handleDeleteModule(module.id);
-              Navigator.pop(context);
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showCreateModuleDialog() {
+  void _showAddModuleDialog() {
     final TextEditingController controller = TextEditingController();
-    Color selectedColor = _colorPalette[0];
+    Color chosenColor = const Color(0xff5732a3);
+    final List<Color> palette = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => AlertDialog(
-          title: const Text('New Subject / Tag', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text('New Category Tag', style: TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'e.g., CS2040S, Side Project')),
+              TextField(controller: controller, decoration: const InputDecoration(hintText: 'Subject Code (e.g., CS1101S)'), autofocus: true),
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: _colorPalette.map((color) {
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: palette.map((color) {
+                  final bool selected = chosenColor == color;
                   return GestureDetector(
-                    onTap: () => setModalState(() => selectedColor = color),
-                    child: CircleAvatar(
-                      radius: 14, backgroundColor: color,
-                      child: selectedColor == color ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                    onTap: () => setModalState(() => chosenColor = color),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: selected ? Border.all(color: Colors.black, width: 2.5) : null),
                     ),
                   );
                 }).toList(),
@@ -293,12 +215,12 @@ class _TasksScreenState extends State<TasksScreen> {
             TextButton(
               onPressed: () {
                 if (controller.text.isNotEmpty) {
-                  _handleCreateModule(controller.text, selectedColor);
+                  _handleCreateModule(controller.text.trim(), chosenColor);
                   Navigator.pop(context);
                 }
               },
-              child: const ColorFiltered(colorFilter: ColorFilter.mode(Colors.transparent, BlendMode.multiply), child: Text('Create', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold))),
-            ),
+              child: const Text('Create', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+            )
           ],
         ),
       ),
@@ -317,7 +239,7 @@ class _TasksScreenState extends State<TasksScreen> {
           TextButton(
             onPressed: () {
               if (controller.text.isNotEmpty) {
-                _handleAddTask(module, controller.text);
+                _handleAddTask(module, controller.text.trim());
                 Navigator.pop(context);
               }
             },
@@ -325,6 +247,83 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _confirmDeleteModule(DBTaskModule module) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Subject?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('Permanently wipe out "${module.name}" and all tasks inside?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(
+            onPressed: () {
+              _handleDeleteModule(module);
+              Navigator.pop(context);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xfff8f9fa),
+      appBar: AppBar(
+        title: const Text('Workspace Objectives', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: const Color(0xff5732a3),
+        actions: [IconButton(icon: const Icon(Icons.create_new_folder, color: Colors.white), onPressed: _showAddModuleDialog)],
+      ),
+      body: _isFetching
+          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
+          : _modules.isEmpty
+              ? const Center(child: Text('No active subjects. Tap the folder icon to add one!'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16.0),
+                  itemCount: _modules.length,
+                  itemBuilder: (context, index) {
+                    final module = _modules[index];
+                    return Card(
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          initiallyExpanded: true,
+                          leading: CircleAvatar(radius: 6, backgroundColor: module.color),
+                          title: Text(module.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.black54, size: 20), onPressed: () => _showAddTaskDialog(module)),
+                              IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20), onPressed: () => _confirmDeleteModule(module)),
+                            ],
+                          ),
+                          children: module.tasks.isEmpty
+                              ? [
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                                    child: Text('No tasks under this tag yet.', style: TextStyle(color: Colors.grey, fontSize: 13, fontStyle: FontStyle.italic)),
+                                  )
+                                ]
+                              : module.tasks.map((task) {
+                                  return ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 24.0),
+                                    leading: Checkbox(activeColor: module.color, value: task.isCompleted, onChanged: (_) => _handleCompleteTask(module, task)),
+                                    title: Text(task.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                                  );
+                                }).toList(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }

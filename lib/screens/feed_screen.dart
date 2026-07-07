@@ -13,37 +13,45 @@ class FeedScreen extends StatefulWidget {
 class _FeedScreenState extends State<FeedScreen> {
   final _supabase = Supabase.instance.client;
   List<dynamic> _feedItems = [];
+  List<Map<String, dynamic>> _modules = [];
   bool _isLoadingFeed = true;
 
   @override
   void initState() {
     super.initState();
     _fetchSocialActivityFeed();
+    _fetchModules();
     syncFeedNotifier.addListener(_fetchSocialActivityFeed);
+    syncFeedNotifier.addListener(_fetchModules);
   }
 
   @override
   void dispose() {
     syncFeedNotifier.removeListener(_fetchSocialActivityFeed);
+    syncFeedNotifier.removeListener(_fetchModules);
     super.dispose();
+  }
+
+  Future<void> _fetchModules() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
+        if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
+      }
+    } catch (_) {}
   }
 
   Future<void> _fetchSocialActivityFeed() async {
     if (!mounted) return;
     setState(() => _isLoadingFeed = true);
-    
+
     try {
       final currentUserId = _supabase.auth.currentUser?.id;
       if (currentUserId == null) return;
 
-      final followingResponse = await _supabase
-          .from('follows')
-          .select('following_id')
-          .eq('follower_id', currentUserId);
-
-      final List<String> followedIds = List<String>.from(
-        followingResponse.map((f) => f['following_id'].toString()),
-      );
+      final followingResponse = await _supabase.from('follows').select('following_id').eq('follower_id', currentUserId);
+      final List<String> followedIds = List<String>.from(followingResponse.map((f) => f['following_id'].toString()));
 
       if (!followedIds.contains(currentUserId)) {
         followedIds.add(currentUserId);
@@ -63,7 +71,6 @@ class _FeedScreenState extends State<FeedScreen> {
         });
       }
     } catch (e) {
-      print('Feed core engine error: $e');
       if (mounted) setState(() => _isLoadingFeed = false);
     }
   }
@@ -126,12 +133,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   Expanded(
                     child: TextField(
                       controller: textController,
-                      decoration: InputDecoration(
-                        hintText: "Add a comment...",
-                        filled: true,
-                        fillColor: Colors.grey[100],
-                        border: InputBorder.none, 
-                      ),
+                      decoration: InputDecoration(hintText: "Add a comment...", filled: true, fillColor: Colors.grey[100], border: InputBorder.none),
                     ),
                   ),
                   IconButton(
@@ -159,14 +161,14 @@ class _FeedScreenState extends State<FeedScreen> {
 
   void _showFindFriendsModal() async {
     final currentUserId = _supabase.auth.currentUser?.id;
-    String searchQuery = ""; 
+    String searchQuery = "";
     List<dynamic> searchedProfiles = [];
     Set<String> followingIds = {};
     bool isSearching = false;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, 
+      isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
@@ -176,15 +178,11 @@ class _FeedScreenState extends State<FeedScreen> {
               if (currentUserId == null || query.trim().isEmpty) return;
               setModalState(() => isSearching = true);
               try {
-                final List<dynamic> results = await _supabase.rpc(
-                  'search_users_v1',
-                  params: {'search_text': query.trim(), 'current_user_id': currentUserId},
-                );
+                final List<dynamic> results = await _supabase.rpc('search_users_v1', params: {'search_text': query.trim(), 'current_user_id': currentUserId});
                 final followingList = await _supabase.from('follows').select('following_id').eq('follower_id', currentUserId);
                 followingIds = followingList.map((f) => f['following_id'].toString()).toSet();
                 setModalState(() => searchedProfiles = results);
-              } catch (e) {
-                print("Remote execution RPC error: $e");
+              } catch (_) {
               } finally {
                 setModalState(() => isSearching = false);
               }
@@ -198,45 +196,41 @@ class _FeedScreenState extends State<FeedScreen> {
                   const Text('Find Friends', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 12),
                   TextField(
-                    onChanged: (v) { searchQuery = v; performSearch(searchQuery); },
-                    decoration: InputDecoration(
-                      hintText: "Search by username...",
-                      prefixIcon: const Icon(Icons.search, color: Color(0xff5732a3)),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      border: InputBorder.none, 
-                    ),
+                    onChanged: (v) {
+                      searchQuery = v;
+                      performSearch(searchQuery);
+                    },
+                    decoration: const InputDecoration(hintText: "Search by username...", prefixIcon: Icon(Icons.search, color: Color(0xff5732a3)), filled: true, border: InputBorder.none),
                   ),
                   const SizedBox(height: 16),
-                  if (isSearching) const CircularProgressIndicator()
-                  else ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.35),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: searchedProfiles.length,
-                      itemBuilder: (context, index) {
-                        final profile = searchedProfiles[index];
-                        final pId = profile['id'];
-                        final isFollowing = followingIds.contains(pId);
-                        return ListTile(
-                          title: Text(profile['username'] ?? 'User'),
-                          trailing: ElevatedButton(
-                            onPressed: () async {
-                              if (isFollowing) {
-                                await _supabase.from('follows').delete().eq('follower_id', currentUserId!).eq('following_id', pId);
-                                setModalState(() => followingIds.remove(pId));
-                              } else {
-                                await _supabase.from('follows').insert({'follower_id': currentUserId!, 'following_id': pId});
-                                setModalState(() => followingIds.add(pId));
-                              }
-                              _fetchSocialActivityFeed();
+                  if (isSearching) const CircularProgressIndicator() else ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.35),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: searchedProfiles.length,
+                            itemBuilder: (context, index) {
+                              final profile = searchedProfiles[index];
+                              final pId = profile['id'];
+                              final isFollowing = followingIds.contains(pId);
+                              return ListTile(
+                                title: Text(profile['username'] ?? 'User'),
+                                trailing: ElevatedButton(
+                                  onPressed: () async {
+                                    if (isFollowing) {
+                                      await _supabase.from('follows').delete().eq('follower_id', currentUserId!).eq('following_id', pId);
+                                      setModalState(() => followingIds.remove(pId));
+                                    } else {
+                                      await _supabase.from('follows').insert({'follower_id': currentUserId!, 'following_id': pId});
+                                      setModalState(() => followingIds.add(pId));
+                                    }
+                                    _fetchSocialActivityFeed();
+                                  },
+                                  child: Text(isFollowing ? 'Unfollow' : 'Follow'),
+                                ),
+                              );
                             },
-                            child: Text(isFollowing ? 'Unfollow' : 'Follow'),
                           ),
-                        );
-                      },
-                    ),
-                  ),
+                        ),
                   const SizedBox(height: 16),
                 ],
               ),
@@ -247,14 +241,13 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // --- TIME AND DATE FORMATTERS ---
   String _getExactDate(String? timestamp) {
     if (timestamp == null) return '';
     try {
       final date = DateTime.parse(timestamp).toLocal();
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${months[date.month - 1]} ${date.day}';
-    } catch (e) {
+    } catch (_) {
       return '';
     }
   }
@@ -264,48 +257,35 @@ class _FeedScreenState extends State<FeedScreen> {
     try {
       final date = DateTime.parse(timestamp).toLocal();
       final diff = DateTime.now().difference(date);
-      
       if (diff.inDays > 7) return '${date.year}';
       if (diff.inDays > 1) return '${diff.inDays} days ago';
       if (diff.inDays == 1) return 'Yesterday';
       if (diff.inHours > 0) return '${diff.inHours} ${diff.inHours == 1 ? 'hr' : 'hrs'} ago';
       if (diff.inMinutes > 0) return '${diff.inMinutes} ${diff.inMinutes == 1 ? 'min' : 'mins'} ago';
       return 'Just now';
-    } catch (e) {
+    } catch (_) {
       return 'Recently';
     }
   }
 
-  // --- DYNAMIC COLOR GENERATOR FOR TAGS ---
   Color _getColorForModule(String moduleName) {
-    final colors = [
-      const Color(0xff5732a3), // Primary Purple
-      Colors.blueAccent, 
-      Colors.teal,
-      Colors.orange, 
-      Colors.pinkAccent, 
-      Colors.redAccent,
-      Colors.indigo, 
-      const Color(0xff2d4059)
-    ];
-    // Uses the string's hashcode to always pick the same color for the same module code
+    try {
+      final match = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == moduleName.toLowerCase());
+      if (match['color_hex'] != null) {
+        return Color(int.parse(match['color_hex'].toString()));
+      }
+    } catch (_) {}
+    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
     int hash = moduleName.hashCode;
     return colors[hash.abs() % colors.length];
   }
 
-  // --- UI HELPERS FOR THE CARD ---
   Widget _buildStatColumn(String label, String value) {
     return Column(
       children: [
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12), textAlign: TextAlign.center),
         const SizedBox(height: 4),
-        Text(
-          value,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        Text(value, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black), maxLines: 1, overflow: TextOverflow.ellipsis),
       ],
     );
   }
@@ -318,8 +298,7 @@ class _FeedScreenState extends State<FeedScreen> {
       backgroundColor: const Color(0xfff8f9fa),
       appBar: AppBar(
         title: const Text('Activity Feed', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xff5732a3), 
+        backgroundColor: const Color(0xff5732a3),
         actions: [IconButton(icon: const Icon(Icons.person_add_alt_1, color: Colors.white), onPressed: _showFindFriendsModal)],
       ),
       body: RefreshIndicator(
@@ -332,7 +311,6 @@ class _FeedScreenState extends State<FeedScreen> {
                     padding: const EdgeInsets.all(16),
                     itemCount: _feedItems.length,
                     itemBuilder: (context, index) {
-                      
                       final item = _feedItems[index] as Map<String, dynamic>;
                       final username = item['profiles']?['username'] ?? 'Scholar';
                       final List<dynamic> likes = item['session_likes'] ?? [];
@@ -343,8 +321,7 @@ class _FeedScreenState extends State<FeedScreen> {
                       final durationMins = item['duration_minutes']?.toString() ?? '0';
                       final location = item['location']?.toString() ?? 'Campus';
                       final xp = item['xp_earned']?.toString() ?? '0';
-                      
-                      // STRING PARSING: Splits "Tutorial 1 (BT1101)" into task and tag
+
                       String taskName = subjectFull;
                       String moduleName = '';
                       if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
@@ -352,8 +329,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         taskName = subjectFull.substring(0, openParen).trim();
                         moduleName = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
                       }
-                      
-                      // DATE FORMATTING
+
                       final exactDate = _getExactDate(item['created_at']?.toString());
                       final timeAgo = _getTimeAgo(item['created_at']?.toString());
                       final dateDisplay = exactDate.isNotEmpty ? '$exactDate • $timeAgo' : timeAgo;
@@ -368,14 +344,9 @@ class _FeedScreenState extends State<FeedScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              
-                              // 1. Header: Avatar, Username, and Explicit Date
                               Row(
                                 children: [
-                                  const CircleAvatar(
-                                    backgroundColor: Color(0xff3f6b8e),
-                                    child: Icon(Icons.person, color: Colors.white),
-                                  ),
+                                  const CircleAvatar(backgroundColor: Color(0xff3f6b8e), child: Icon(Icons.person, color: Colors.white)),
                                   const SizedBox(width: 12),
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,17 +358,10 @@ class _FeedScreenState extends State<FeedScreen> {
                                 ],
                               ),
                               const SizedBox(height: 16),
-
-                              // 2. Main Title & Dynamic Colored Tag
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      '$taskName Session',
-                                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
-                                    ),
-                                  ),
+                                  Expanded(child: Text('$taskName Session', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black))),
                                   if (moduleName.isNotEmpty) ...[
                                     const SizedBox(width: 8),
                                     Container(
@@ -407,47 +371,27 @@ class _FeedScreenState extends State<FeedScreen> {
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(color: _getColorForModule(moduleName), width: 1),
                                       ),
-                                      child: Text(
-                                        moduleName,
-                                        style: TextStyle(
-                                          color: _getColorForModule(moduleName), 
-                                          fontWeight: FontWeight.bold, 
-                                          fontSize: 12
-                                        ),
-                                      ),
+                                      child: Text(moduleName, style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 12)),
                                     ),
                                   ]
                                 ],
                               ),
                               const SizedBox(height: 16),
-
-                              // 3. Location Circle
                               Center(
                                 child: Container(
                                   height: 80,
                                   width: 80,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: const Color(0xff5732a3), width: 2),
-                                  ),
+                                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xff5732a3), width: 2)),
                                   child: Center(
                                     child: Padding(
                                       padding: const EdgeInsets.all(8.0),
-                                      child: Text(
-                                        location,
-                                        textAlign: TextAlign.center,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold, fontSize: 11),
-                                      ),
+                                      child: Text(location, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold, fontSize: 11)),
                                     ),
                                   ),
                                 ),
                               ),
                               const SizedBox(height: 16),
                               const Divider(),
-
-                              // 4. Stats Row
                               Row(
                                 children: [
                                   Expanded(child: _buildStatColumn('Duration', '${durationMins}min')),
@@ -456,28 +400,18 @@ class _FeedScreenState extends State<FeedScreen> {
                                 ],
                               ),
                               const Divider(),
-
-                              // 5. XP Row
                               Row(
                                 children: [
                                   Expanded(child: _buildStatColumn('XP Earned', '+$xp XP')),
                                 ],
                               ),
                               const Divider(),
-
-                              // 6. Social Buttons
                               Row(
                                 children: [
-                                  IconButton(
-                                    icon: Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? Colors.red : Colors.grey), 
-                                    onPressed: () => _toggleLike(item['id'].toString(), isLiked),
-                                  ),
+                                  IconButton(icon: Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? Colors.red : Colors.grey), onPressed: () => _toggleLike(item['id'].toString(), isLiked)),
                                   Text('${likes.length}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
                                   const SizedBox(width: 24),
-                                  IconButton(
-                                    icon: const Icon(Icons.comment_outlined, color: Colors.grey), 
-                                    onPressed: () => _showCommentsModal(item['id'].toString(), comments),
-                                  ),
+                                  IconButton(icon: const Icon(Icons.comment_outlined, color: Colors.grey), onPressed: () => _showCommentsModal(item['id'].toString(), comments)),
                                   Text('${comments.length}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
                                 ],
                               )

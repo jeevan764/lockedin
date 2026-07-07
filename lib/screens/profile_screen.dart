@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'dashboard_screen.dart';
-import 'login_screen.dart'; // Safe import to handle sign out navigation route
 
-// Imports Jeevan's syncProfileNotifier  
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -15,73 +13,82 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
-  late TabController _tabController;
+  late TabController _subTabController;
 
-  // Merged State Variables
-  List<dynamic> _myHistory = [];
-  List<Map<String, dynamic>> _modules = [];
   bool _isLoading = true;
+  String _username = 'User';
   int _totalXp = 0;
   int _currentStreak = 0;
-  String _username = "Loading...";
-  int _followerCount = 0;
-  int _followingCount = 0;
 
-  // Calendar Variables
+  List<dynamic> _myHistory = [];
+  List<Map<String, dynamic>> _modules = [];
+  Map<DateTime, List<dynamic>> _sessionsByDay = {};
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  Map<DateTime, List<dynamic>> _sessionsByDay = {};
+
+  // Strava-Style Followers & Following Data Lists
+  List<String> _followersUsernames = [];
+  List<String> _followingUsernames = [];
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = _focusedDay;
-    _tabController = TabController(length: 2, vsync: this);
-    _loadProfileDetails();
+    _subTabController = TabController(length: 2, vsync: this);
+    _selectedDay = DateTime(_focusedDay.year, _focusedDay.month, _focusedDay.day);
+    _fetchProfileMetrics();
     _fetchModules();
-    syncProfileNotifier.addListener(_loadProfileDetails);
+    syncProfileNotifier.addListener(_fetchProfileMetrics);
+    syncProfileNotifier.addListener(_fetchModules);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
-    syncProfileNotifier.removeListener(_loadProfileDetails);
+    _subTabController.dispose();
+    syncProfileNotifier.removeListener(_fetchProfileMetrics);
+    syncProfileNotifier.removeListener(_fetchModules);
     super.dispose();
   }
 
-  // --- CORE DATA FETCHING ---
-  Future<void> _loadProfileDetails() async {
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
+  Future<void> _handleSignOut() async {
     try {
-      final currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId == null) return;
+      await _supabase.auth.signOut();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error signing out: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
 
-      final profileData = await _supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
-      if (profileData != null) _username = profileData['username'] ?? 'User';
+  Future<void> _fetchProfileMetrics() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
 
-      final followersData = await _supabase.from('follows').select('id').eq('following_id', currentUserId);
-      final followingData = await _supabase.from('follows').select('id').eq('follower_id', currentUserId);
+      final profileData = await _supabase.from('profiles').select('username').eq('id', user.id).single();
+      _username = profileData['username'] ?? 'User';
 
-      final response = await _supabase
-          .from('study_sessions')
-          .select('*')
-          .eq('user_id', currentUserId)
-          .order('created_at', ascending: false);
+      // Fetch follow data and resolve nested profile usernames
+      final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
+      final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
+
+      _followersUsernames = (followersData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+      _followingUsernames = (followingData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+
+      final response = await _supabase.from('study_sessions').select().eq('user_id', user.id).order('created_at', ascending: false);
 
       int xpCounter = 0;
-      Set<String> uniqueDates = {};
       Map<DateTime, List<dynamic>> groupedSessions = {};
+      Set<String> uniqueDates = {};
 
-      for (var rawRow in response) {
-        final row = rawRow as Map<String, dynamic>;
+      for (var row in response) {
         xpCounter += (row['xp_earned'] as num?)?.toInt() ?? 0;
         if (row['created_at'] != null) {
           DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
           DateTime cleanDate = DateTime(date.year, date.month, date.day);
 
-          uniqueDates.add("${date.year}-${date.month}-${date.day}");
+          uniqueDates.add("${cleanDate.year}-${cleanDate.month}-${cleanDate.day}");
 
           if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
           groupedSessions[cleanDate]!.add(row);
@@ -92,15 +99,12 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         setState(() {
           _myHistory = response;
           _totalXp = xpCounter;
-          _followerCount = followersData.length;
-          _followingCount = followingData.length;
           _sessionsByDay = groupedSessions;
           _currentStreak = _calculateStreak(uniqueDates);
           _isLoading = false;
         });
       }
     } catch (e) {
-      print('Profile metrics load issue: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -120,18 +124,20 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   int _calculateStreak(Set<String> uniqueDates) {
     int streak = 0;
     DateTime checkDate = DateTime.now();
+    DateTime todayClean = DateTime(checkDate.year, checkDate.month, checkDate.day);
+    DateTime check = todayClean;
 
     while (true) {
-      String checkStr = "${checkDate.year}-${checkDate.month}-${checkDate.day}";
+      String checkStr = "${check.year}-${check.month}-${check.day}";
       if (uniqueDates.contains(checkStr)) {
         streak++;
-        checkDate = checkDate.subtract(const Duration(days: 1));
+        check = check.subtract(const Duration(days: 1));
       } else {
         if (streak == 0) {
-          DateTime yesterday = DateTime.now().subtract(const Duration(days: 1));
+          DateTime yesterday = todayClean.subtract(const Duration(days: 1));
           String yestStr = "${yesterday.year}-${yesterday.month}-${yesterday.day}";
           if (uniqueDates.contains(yestStr)) {
-            checkDate = yesterday;
+            check = yesterday;
             continue;
           }
         }
@@ -141,44 +147,71 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return streak;
   }
 
-  List<dynamic> _getEventsForDay(DateTime day) {
-    DateTime cleanDay = DateTime(day.year, day.month, day.day);
-    return _sessionsByDay[cleanDay] ?? [];
+  Color _getColorForModule(String moduleName) {
+    try {
+      final match = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == moduleName.toLowerCase());
+      if (match['color_hex'] != null) {
+        String hex = match['color_hex'].toString().replaceAll('#', '').trim();
+        if (hex.startsWith('0x')) hex = hex.substring(2);
+        if (hex.length == 6) hex = 'FF$hex';
+        return Color(int.parse(hex, radix: 16));
+      }
+    } catch (_) {}
+    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
+    int hash = moduleName.hashCode;
+    return colors[hash.abs() % colors.length];
   }
 
-  // --- EDIT & DELETE LOGIC WITH EXPLICIT AWAIT AND SELECT ---
-  Future<void> _updateSession(dynamic id, String subject, int duration, String location) async {
-    try {
-      final response = await _supabase.from('study_sessions').update({
-        'subject': subject,
-        'duration_minutes': duration,
-        'location': location,
-        'xp_earned': duration * 2,
-      }).eq('id', id).select();
-
-      if (response.isEmpty) {
-        throw Exception("Database blocked the update. Missing RLS Update policy!");
-      }
-      await _loadProfileDetails();
-      syncFeedNotifier.value++;
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Updated!'), backgroundColor: Colors.green));
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-    }
+  // Strava-style bottom panel sheet for interactions
+  void _showSocialListModal(String title, List<String> usernames) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.white,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
+            const Divider(height: 24),
+            usernames.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: Text("No users found here yet.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                  )
+                : Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: usernames.length,
+                      itemBuilder: (ctx, i) => ListTile(
+                        leading: const CircleAvatar(backgroundColor: Color(0xfff1eefc), child: Icon(Icons.person, color: Color(0xff5732a3), size: 20)),
+                        title: Text('@${usernames[i]}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                        trailing: OutlinedButton(
+                          onPressed: () {},
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xff5732a3)), 
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
+                          ),
+                          child: const Text('View Profile', style: TextStyle(color: Color(0xff5732a3), fontSize: 12)),
+                        ),
+                      ),
+                    ),
+                  ),
+          ],
+        ),
+      ),
+    );
   }
 
-  Future<void> _deleteSession(dynamic id) async {
+  Future<void> _deleteSession(dynamic sessionId) async {
     try {
-      final response = await _supabase.from('study_sessions').delete().eq('id', id).select();
-      if (response.isEmpty) {
-        throw Exception("Database blocked the deletion. Missing RLS Delete policy!");
-      }
-
-      await _loadProfileDetails();
+      await _supabase.from('study_sessions').delete().eq('id', sessionId);
+      _fetchProfileMetrics();
       syncFeedNotifier.value++;
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Deleted.'), backgroundColor: Colors.grey));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
     }
   }
 
@@ -187,23 +220,20 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     final sessionId = session['id'];
     String rawSubject = session['subject']?.toString() ?? '';
     String initialTaskName = rawSubject;
-    String? initialSelectedModule;
+    String? selectedModuleId;
 
     if (rawSubject.contains('(') && rawSubject.endsWith(')')) {
       int openParen = rawSubject.lastIndexOf('(');
       initialTaskName = rawSubject.substring(0, openParen).trim();
       String tagName = rawSubject.substring(openParen + 1, rawSubject.length - 1).trim();
       try {
-        initialSelectedModule = _modules.firstWhere((m) => m['name'] == tagName)['id'].toString();
-      } catch (e) {
-        initialSelectedModule = null;
-      }
+        selectedModuleId = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == tagName.toLowerCase())['id'].toString();
+      } catch (_) {}
     }
 
     final taskNameController = TextEditingController(text: initialTaskName);
     final durationController = TextEditingController(text: session['duration_minutes']?.toString() ?? '0');
     final locationController = TextEditingController(text: session['location']?.toString() ?? '');
-    String? selectedModuleId = initialSelectedModule;
 
     showDialog(
       context: context,
@@ -215,11 +245,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(controller: taskNameController, decoration: const InputDecoration(labelText: 'Task Name', hintText: 'e.g. Tutorial 3')),
+                  TextField(controller: taskNameController, decoration: const InputDecoration(labelText: 'Task Name')),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100], 
+                      borderRadius: BorderRadius.circular(8), 
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         isExpanded: true,
@@ -238,74 +272,34 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               ),
             ),
             actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
               TextButton(
                 onPressed: () async {
-                  Navigator.pop(ctx);
-                  await _deleteSession(sessionId);
-                },
-                child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-              ),
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white),
-                onPressed: () async {
-                  final newDuration = int.tryParse(durationController.text) ?? 0;
-                  if (taskNameController.text.isNotEmpty && newDuration > 0) {
-                    String finalSubject = taskNameController.text.trim();
-                    if (selectedModuleId != null) {
-                      String modName = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId)['name'].toString();
-                      finalSubject = '$finalSubject ($modName)';
-                    }
-                    Navigator.pop(ctx);
-                    await _updateSession(sessionId, finalSubject, newDuration, locationController.text);
+                  String finalSubject = taskNameController.text.trim();
+                  if (selectedModuleId != null) {
+                    final matchedMod = _modules.firstWhere((m) => m['id'].toString() == selectedModuleId);
+                    finalSubject = '$finalSubject (${matchedMod['name']})';
                   }
+                  int minutes = int.tryParse(durationController.text.trim()) ?? 0;
+                  await _supabase.from('study_sessions').update({
+                    'subject': finalSubject,
+                    'duration_minutes': minutes,
+                    'location': locationController.text.trim(),
+                    'xp_earned': minutes * 10,
+                  }).eq('id', sessionId);
+                  Navigator.pop(context);
+                  _fetchProfileMetrics();
+                  syncFeedNotifier.value++;
                 },
-                child: const Text('Save'),
-              ),
+                child: const Text('Save Changes', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+              )
             ],
           );
-        }
+        },
       ),
     );
   }
 
-  Color _getColorForModule(String moduleName) {
-    final colors = [
-      const Color(0xff5732a3),
-      Colors.blueAccent,
-      Colors.teal,
-      Colors.orange,
-      Colors.pinkAccent,
-      Colors.redAccent,
-      Colors.indigo,
-      const Color(0xff2d4059)
-    ];
-    int hash = moduleName.hashCode;
-    return colors[hash.abs() % colors.length];
-  }
-
-  /// Logs the user out securely from Supabase and safely cleans navigation paths
-  Future<void> _handleLogout() async {
-    try {
-      await _supabase.auth.signOut(); // Logs out session token cleanly
-      if (mounted) {
-        // Use the root navigator instance to cleanly swap the entire bottom navigation tree out for the login page
-        Navigator.of(context, rootNavigator: true).pushReplacement(
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Logout failed: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  
-
-  // --- UI BUILDERS ---
   @override
   Widget build(BuildContext context) {
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
@@ -316,13 +310,29 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         title: const Text('My Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xff5732a3),
         elevation: 0,
-        automaticallyImplyLeading: false, // Prevents default back navigation arrows
         actions: [
-          // Clear white logout icon added cleanly as an AppBar option
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white), // Explicit color so it's fully visible on purple background
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
             tooltip: 'Log Out',
-            onPressed: _handleLogout,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold)),
+                  content: const Text('Are you sure you want to log out of LockedIn?'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _handleSignOut();
+                      },
+                      child: const Text('Log Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -330,6 +340,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
           : Column(
               children: [
+                // Top Identity & Summary Card Area
                 Container(
                   width: double.infinity,
                   color: const Color(0xff5732a3),
@@ -340,15 +351,45 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                       const SizedBox(height: 10),
                       Text('@$_username', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
+                      
+                      // Strava-Style Interactive Metrics Row
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text('$_followerCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          const Text(' Followers', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                          const SizedBox(width: 24),
-                          Text('$_followingCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          const Text(' Following', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          GestureDetector(
+                            onTap: () => _showSocialListModal('Followers', _followersUsernames),
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+                                child: Row(
+                                  children: [
+                                    Text('${_followersUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    const Text(' Followers', style: TextStyle(color: Colors.white, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          GestureDetector(
+                            onTap: () => _showSocialListModal('Following', _followingUsernames),
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+                                child: Row(
+                                  children: [
+                                    Text('${_followingUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    const Text(' Following', style: TextStyle(color: Colors.white, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -367,45 +408,41 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                               Row(
                                 children: [
                                   const Icon(Icons.local_fire_department, color: Colors.orangeAccent, size: 20),
-                                  Text('$_currentStreak', style: const TextStyle(color: Colors.orangeAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                                  Text('$_currentStreak', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
                                 ],
                               ),
                               const Text('DAY STREAK', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
                             ],
                           ),
                         ],
-                      ),
+                      )
                     ],
                   ),
                 ),
+                
+                // Sliding Control TabBar
                 Container(
                   color: Colors.white,
                   child: TabBar(
-                    controller: _tabController,
+                    controller: _subTabController,
                     labelColor: const Color(0xff5732a3),
-                    unselectedLabelColor: Colors.black54,
+                    unselectedLabelColor: Colors.grey,
                     indicatorColor: const Color(0xff5732a3),
-                    indicatorSize: TabBarIndicatorSize.tab,
+                    indicatorWeight: 3,
                     tabs: const [
                       Tab(icon: Icon(Icons.calendar_month), text: "Calendar"),
-                      Tab(icon: Icon(Icons.history), text: "History Log"),
+                      Tab(icon: Icon(Icons.bar_chart_rounded), text: "Analytics"),
                     ],
                   ),
                 ),
+
+                // Sliding Sub-tab View Controller
                 Expanded(
                   child: TabBarView(
-                    controller: _tabController,
+                    controller: _subTabController,
                     children: [
-                      _buildInteractiveCalendarTab(),
-                      _myHistory.isEmpty
-                          ? const Center(child: Text('No study history recorded.', style: TextStyle(color: Colors.grey)))
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: _myHistory.length,
-                              itemBuilder: (context, index) {
-                                return _buildActivityItem(_myHistory[index]);
-                              },
-                            ),
+                      _buildCalendarViewTab(),
+                      _buildAnalyticsViewTab(),
                     ],
                   ),
                 )
@@ -414,27 +451,29 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildInteractiveCalendarTab() {
-    final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
+  Widget _buildCalendarViewTab() {
+    DateTime lookupKey = _selectedDay ?? DateTime(_focusedDay.year, _focusedDay.month, _focusedDay.day);
+    final selectedEvents = _sessionsByDay[lookupKey] ?? [];
+
     return SingleChildScrollView(
       child: Column(
         children: [
           Card(
+            elevation: 0,
             margin: const EdgeInsets.all(16),
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.black12)),
             child: TableCalendar(
-              firstDay: DateTime.utc(2023, 1, 1),
+              firstDay: DateTime.utc(2024, 1, 1),
               lastDay: DateTime.utc(2030, 12, 31),
               focusedDay: _focusedDay,
               selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              eventLoader: (day) => _sessionsByDay[DateTime(day.year, day.month, day.day)] ?? [],
               onDaySelected: (selectedDay, focusedDay) {
                 setState(() {
-                  _selectedDay = selectedDay;
+                  _selectedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
                   _focusedDay = focusedDay;
                 });
               },
-              eventLoader: _getEventsForDay,
               calendarStyle: CalendarStyle(
                 todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withOpacity(0.3), shape: BoxShape.circle),
                 selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
@@ -454,11 +493,165 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: selectedEvents.length,
-              itemBuilder: (context, index) {
-                return _buildActivityItem(selectedEvents[index]);
-              },
+              itemBuilder: (context, index) => _buildActivityItem(selectedEvents[index]),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAnalyticsViewTab() {
+    if (_myHistory.isEmpty) {
+      return const Center(child: Text("Complete study sessions to generate metric summaries!"));
+    }
+
+    int totalMinutes = 0;
+    Map<String, int> moduleTimeMap = {};
+    Map<String, int> locationMap = {};
+
+    for (var session in _myHistory) {
+      int duration = (session['duration_minutes'] as num?)?.toInt() ?? 0;
+      totalMinutes += duration;
+
+      String subjectFull = session['subject']?.toString() ?? '';
+      String moduleTag = 'General';
+      if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
+        int openParen = subjectFull.lastIndexOf('(');
+        moduleTag = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
+      }
+      moduleTimeMap[moduleTag] = (moduleTimeMap[moduleTag] ?? 0) + duration;
+
+      String location = session['location']?.toString() ?? 'Unknown';
+      if (location.isEmpty) location = 'Unspecified';
+      locationMap[location] = (locationMap[location] ?? 0) + 1;
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // FIXED Metrics Header row blocks using Expanded constraints
+        Row(
+          children: [
+            Expanded(
+              child: _buildMetricCard(
+                'Total Focus', 
+                '${(totalMinutes / 60).toStringAsFixed(1)} hrs', 
+                Icons.timer_outlined, 
+                Colors.blueAccent
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildMetricCard(
+                'Sessions Run', 
+                '${_myHistory.length} completed', 
+                Icons.emoji_events_outlined, 
+                Colors.orangeAccent
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // FIXED Symmetrical Subject Progress Trackers
+        const Text('Focus Allocation by Subject', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: moduleTimeMap.entries.map((entry) {
+                double fraction = totalMinutes > 0 ? entry.value / totalMinutes : 0.0;
+                Color tagColor = _getColorForModule(entry.key);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black)),
+                          Text('${entry.value} mins (${(fraction * 100).toStringAsFixed(0)}%)', style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: fraction,
+                          backgroundColor: Colors.grey[200],
+                          color: tagColor,
+                          minHeight: 8,
+                        ),
+                      )
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        const Text('Top Study Environments', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: locationMap.length > 3 ? 3 : locationMap.length,
+            separatorBuilder: (context, index) => const Divider(height: 1),
+            itemBuilder: (context, idx) {
+              var sortedEntries = locationMap.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+              var entry = sortedEntries[idx];
+              return ListTile(
+                leading: CircleAvatar(backgroundColor: Colors.grey[100], child: const Icon(Icons.place, color: Colors.blueGrey)),
+                title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+                trailing: Text('${entry.value} visits', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMetricCard(String title, String val, IconData ico, Color col) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+        child: Row(
+          children: [
+            CircleAvatar(backgroundColor: col.withOpacity(0.1), child: Icon(ico, color: col)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title, 
+                    style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    val, 
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    maxLines: 2,
+                  ),
+                ],
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
@@ -468,11 +661,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     final subjectFull = session['subject']?.toString() ?? 'Unknown Task';
     String taskName = subjectFull;
     String moduleName = '';
+
     if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
       int openParen = subjectFull.lastIndexOf('(');
       taskName = subjectFull.substring(0, openParen).trim();
       moduleName = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
     }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
@@ -489,16 +684,21 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 decoration: BoxDecoration(
                   color: _getColorForModule(moduleName).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: _getColorForModule(moduleName), width: 1),
+                  border: Border.all(color: _getColorForModule(moduleName)),
                 ),
-                child: Text(moduleName, style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 10)),
+                child: Text(moduleName, style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 11)),
               ),
             ]
           ],
         ),
-        subtitle: Text('${session['duration_minutes']} mins at ${session['location']}'),
-        trailing: Text('+${session['xp_earned']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-        onTap: () => _showEditDialog(session),
+        subtitle: Text('${session['duration_minutes']} mins • ${session['location']} • +${session['xp_earned']} XP', style: const TextStyle(fontSize: 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(icon: const Icon(Icons.edit_outlined, size: 18), onPressed: () => _showEditDialog(session)),
+            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18), onPressed: () => _deleteSession(session['id'])),
+          ],
+        ),
       ),
     );
   }

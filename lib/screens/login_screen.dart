@@ -11,7 +11,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _emailController = TextEditingController(); // Swapped out Username
+  final TextEditingController _emailController = TextEditingController(); 
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
@@ -103,7 +103,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.email_outlined, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withOpacity(0.15),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
@@ -119,12 +119,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       hintStyle: const TextStyle(color: Colors.white60),
                       prefixIcon: const Icon(Icons.lock_outline, color: Colors.white60),
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withOpacity(0.15),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
                   const SizedBox(height: 40),
 
+                  // Login Action Button
                   SizedBox(
                     width: double.infinity,
                     height: 54,
@@ -137,7 +138,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         elevation: 2,
                       ),
                       child: _isLoading
-                          ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Color(0xff222222), strokeWidth: 2.5))
+                          ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(color: Color(0xff222222), strokeWidth: 2.5),
+                            )
                           : const Text('Log In', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),

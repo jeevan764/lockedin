@@ -1,7 +1,7 @@
 // lib/screens/signup_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dashboard_screen.dart'; // Loads your persistent 4-tab dashboard view
+import 'dashboard_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -11,7 +11,6 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  // Input tracking text controllers
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -30,7 +29,6 @@ class _SignupScreenState extends State<SignupScreen> {
     final username = _usernameController.text.trim();
     final password = _passwordController.text.trim();
 
-    // 1. Core input parameter validation checks
     if (email.isEmpty || username.isEmpty || password.isEmpty) {
       _showSnackBar('Please fill in all fields', Colors.orange);
       return;
@@ -49,8 +47,6 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 2. Register account parameters inside secure Supabase Auth ledger
-      // UPDATED: Added the user_metadata 'data' map field so the database trigger catches the username
       final AuthResponse response = await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
@@ -58,17 +54,11 @@ class _SignupScreenState extends State<SignupScreen> {
           'username': username,
         },
       );
-
       final user = response.user;
 
       if (user != null) {
-        // 3. REMOVED manual .from('profiles').insert code block.
-        // Your database trigger executed automatically behind the scenes here!
-
         if (mounted) {
           _showSnackBar('Account created successfully!', Colors.green);
-          
-          // 4. CLEAR stack memory and route user straight into the main dashboard screen
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const DashboardScreen()),
@@ -78,7 +68,6 @@ class _SignupScreenState extends State<SignupScreen> {
     } on AuthException catch (error) {
       _showSnackBar(error.message, Colors.red);
     } catch (error) {
-      // Catch-all debug point showcasing explicit PostgreSQL anomalies if they occur
       _showSnackBar('System Error: ${error.toString()}', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -105,10 +94,7 @@ class _SignupScreenState extends State<SignupScreen> {
           gradient: RadialGradient(
             center: Alignment.center,
             radius: 1.2,
-            colors: [
-              Color(0xff8b6bf0), // Radial highlight
-              Color(0xff5732a3), // Deep purple match
-            ],
+            colors: [Color(0xff8b6bf0), Color(0xff5732a3)],
           ),
         ),
         child: SafeArea(
@@ -119,27 +105,17 @@ class _SignupScreenState extends State<SignupScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 10),
-                  // Back navigation threshold asset
                   IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
                     onPressed: () => Navigator.pop(context),
                   ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  const Text(
-                    'Create Account',
-                    style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
-                  ),
+                  const SizedBox(height: 40),
+                  const Text('Create Account', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Sign up to get started tracking tasks',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
-                  
-                  const SizedBox(height: 30),
+                  const Text('Sign up to lock in', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                  const SizedBox(height: 40),
 
-                  // Real Email Input Field
+                  // Email Input Field
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -151,13 +127,9 @@ class _SignupScreenState extends State<SignupScreen> {
                       prefixIcon: const Icon(Icons.email_outlined, color: Colors.white60),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.15),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
-                  
                   const SizedBox(height: 20),
 
                   // Public Custom Username Input Field
@@ -171,13 +143,9 @@ class _SignupScreenState extends State<SignupScreen> {
                       prefixIcon: const Icon(Icons.person_outline, color: Colors.white60),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.15),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
-                  
                   const SizedBox(height: 20),
 
                   // Password Input Field
@@ -193,13 +161,9 @@ class _SignupScreenState extends State<SignupScreen> {
                       prefixIcon: const Icon(Icons.lock_outline, color: Colors.white60),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.15),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
-                  
                   const SizedBox(height: 40),
 
                   // Register Action Trigger Primary Button
@@ -211,21 +175,12 @@ class _SignupScreenState extends State<SignupScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xff222222),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         elevation: 2,
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(color: Color(0xff222222), strokeWidth: 2.5),
-                            )
-                          : const Text(
-                              'Sign Up',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
+                      child: _isLoading ?
+                        const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Color(0xff222222), strokeWidth: 2.5)) : 
+                        const Text('Sign Up', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

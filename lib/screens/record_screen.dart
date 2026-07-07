@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dashboard_screen.dart'; 
+import 'dashboard_screen.dart';
 
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
@@ -13,26 +13,24 @@ class RecordScreen extends StatefulWidget {
 
 class _RecordScreenState extends State<RecordScreen> {
   final _supabase = Supabase.instance.client;
-  
-  // Tag Fetching State
-  List<Map<String, dynamic>> _modules = [];
-  String? _selectedModuleId;
-  String? _selectedModuleName;
-  bool _isLoadingModules = true;
 
-  // View Toggle State
+  // Timer Variables
+  Timer? _uiTimer;
+  bool _isRunning = false;
+  Duration _accumulatedTime = Duration.zero;
+  DateTime? _lastStartTime;
+
+  // Form Inputs
   bool _isTimerMode = true;
-  
-  // Inputs State
-  final _taskNameController = TextEditingController(); 
+  final _taskNameController = TextEditingController();
   final _durationController = TextEditingController();
   final _locationController = TextEditingController();
 
-  // Live Timer State
-  Duration _accumulatedTime = Duration.zero;
-  DateTime? _lastStartTime;
-  Timer? _uiTimer;
-  bool _isRunning = false;
+  // Workspace Tags Data
+  List<Map<String, dynamic>> _modules = [];
+  bool _isLoadingModules = true;
+  String? _selectedModuleId;
+  String? _selectedModuleName;
   bool _isSubmitting = false;
 
   @override
@@ -50,7 +48,6 @@ class _RecordScreenState extends State<RecordScreen> {
     super.dispose();
   }
 
-  // --- BACKGROUND-SAFE TIMER LOGIC ---
   void _toggleTimer() {
     setState(() {
       if (_isRunning) {
@@ -81,7 +78,6 @@ class _RecordScreenState extends State<RecordScreen> {
     });
   }
 
-  // --- DATABASE LOGIC ---
   Future<void> _fetchModules() async {
     try {
       final user = _supabase.auth.currentUser;
@@ -99,15 +95,17 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
-  Future<void> _createNewTag(String name) async {
+  Future<void> _createNewTag(String name, Color chosenColor) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
       
+      final String hexString = '0x${chosenColor.value.toRadixString(16)}';
+
       final response = await _supabase.from('task_modules').insert({
         'user_id': user.id,
         'name': name,
-        'color_hex': '0xff5732a3', 
+        'color_hex': hexString,
       }).select().single();
 
       if (mounted) {
@@ -116,6 +114,7 @@ class _RecordScreenState extends State<RecordScreen> {
           _selectedModuleId = response['id'].toString();
           _selectedModuleName = response['name'];
         });
+        syncTasksNotifier.value++; // Signal Tasks page to refresh right away
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create tag: $e')));
@@ -123,28 +122,25 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _submitSession() async {
-    // Validation Checks
-    if (_taskNameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please name your task.'), backgroundColor: Colors.orange));
-      return;
-    }
-    
-    if (_selectedModuleName == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a module tag.'), backgroundColor: Colors.orange));
+    final String taskNameInput = _taskNameController.text.trim();
+    final String locationInput = _locationController.text.trim().isEmpty ? 'Campus' : _locationController.text.trim();
+
+    if (taskNameInput.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please name what you worked on!')));
       return;
     }
 
-    int durationMins = 0;
+    int duration = 0;
     if (_isTimerMode) {
-      durationMins = _currentElapsed.inMinutes;
-      if (durationMins < 1) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Study for at least 1 minute to save!'), backgroundColor: Colors.orange));
+      duration = _currentElapsed.inMinutes;
+      if (duration < 1) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Focus session must be at least 1 minute long.')));
         return;
       }
     } else {
-      durationMins = int.tryParse(_durationController.text) ?? 0;
-      if (durationMins <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid duration.'), backgroundColor: Colors.orange));
+      duration = int.tryParse(_durationController.text.trim()) ?? 0;
+      if (duration <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please input a valid manual duration.')));
         return;
       }
     }
@@ -153,31 +149,34 @@ class _RecordScreenState extends State<RecordScreen> {
 
     try {
       final user = _supabase.auth.currentUser;
-      final location = _locationController.text.trim().isEmpty ? 'Campus' : _locationController.text.trim();
-      final xp = durationMins * 2;
+      if (user == null) return;
 
-      // COMBINING THE TASK NAME AND MODULE TAG FOR SUPABASE
-      final combinedSubject = '${_taskNameController.text.trim()} ($_selectedModuleName)';
+      String finalSubjectTitle = taskNameInput;
+      if (_selectedModuleName != null && _selectedModuleName!.isNotEmpty) {
+        finalSubjectTitle = '$taskNameInput ($_selectedModuleName)';
+      }
+
+      int xpEarned = duration * 10;
 
       await _supabase.from('study_sessions').insert({
-        'user_id': user!.id,
-        'subject': combinedSubject, 
-        'duration_minutes': durationMins,
-        'location': location,
-        'xp_earned': xp,
-        'created_at': DateTime.now().toIso8601String(), // Retained Jeevan's explicit timestamp
+        'user_id': user.id,
+        'subject': finalSubjectTitle,
+        'duration_minutes': duration,
+        'location': locationInput,
+        'xp_earned': xpEarned,
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session Logged Successfully!'), backgroundColor: Colors.green));
-        if (_isTimerMode) _resetTimer();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Session saved! +$xpEarned XP earned.'), backgroundColor: Colors.green));
+        _resetTimer();
         _taskNameController.clear();
         _durationController.clear();
         _locationController.clear();
 
-        // Retained Jeevan's broadcast payloads
+        // Broadcast payloads
         syncFeedNotifier.value++;
         syncProfileNotifier.value++;
+        syncTasksNotifier.value++;
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -186,14 +185,96 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
-  // --- UI BUILDERS ---
+  Color _getColorForModule(String moduleName) {
+    try {
+      final match = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == moduleName.toLowerCase());
+      if (match['color_hex'] != null) {
+        return Color(int.parse(match['color_hex'].toString()));
+      }
+    } catch (_) {}
+    int hash = moduleName.hashCode;
+    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
+    return colors[hash.abs() % colors.length];
+  }
+
+  void _showCreateTagDialog() {
+    final TextEditingController tagController = TextEditingController();
+    Color chosenColor = const Color(0xff5732a3);
+    
+    final List<Color> palette = [
+      const Color(0xff5732a3),
+      Colors.blueAccent,
+      Colors.teal,
+      Colors.orange,
+      Colors.pinkAccent,
+      Colors.redAccent,
+      Colors.indigo,
+      const Color(0xff2d4059),
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            title: const Text('Create New Tag', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: tagController,
+                  decoration: const InputDecoration(hintText: 'e.g. CS2103T'),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 20),
+                const Align(alignment: Alignment.centerLeft, child: Text('Select Tag Color:', style: TextStyle(color: Colors.grey, fontSize: 13))),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: palette.map((color) {
+                    final bool isSelected = chosenColor == color;
+                    return GestureDetector(
+                      onTap: () => setModalState(() => chosenColor = color),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: isSelected ? Border.all(color: Colors.black, width: 3) : null,
+                        ),
+                        child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 18) : null,
+                      ),
+                    );
+                  }).toList(),
+                )
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+              TextButton(
+                onPressed: () {
+                  if (tagController.text.trim().isNotEmpty) {
+                    _createNewTag(tagController.text.trim(), chosenColor);
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('Create', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text('Record Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xff5732a3),
         elevation: 0,
       ),
@@ -202,7 +283,6 @@ class _RecordScreenState extends State<RecordScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Mode Toggle
             Container(
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
               child: Row(
@@ -231,77 +311,113 @@ class _RecordScreenState extends State<RecordScreen> {
               ),
             ),
             const SizedBox(height: 30),
-
-            // Task Name Input
             TextField(
               controller: _taskNameController,
               decoration: InputDecoration(
                 hintText: 'What are you working on? (e.g. Tutorial 3)',
-                filled: true, fillColor: Colors.white,
+                filled: true,
+                fillColor: Colors.white,
                 prefixIcon: const Icon(Icons.edit_note, color: Colors.grey),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
             const SizedBox(height: 16),
-
-            // Dynamic Tag Selector
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
-              child: _isLoadingModules 
-                ? const Padding(padding: EdgeInsets.all(16.0), child: CircularProgressIndicator())
-                : DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      hint: const Text('Choose Module Tag...', style: TextStyle(fontWeight: FontWeight.bold)),
-                      value: _selectedModuleId,
-                      items: [
-                        ..._modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name'].toString()))).toList(),
-                        const DropdownMenuItem(value: 'ADD_NEW', child: Text('+ Add New Tag', style: TextStyle(color: Color(0xffb73229), fontWeight: FontWeight.bold))),
-                      ],
-                      onChanged: (val) {
-                        if (val == 'ADD_NEW') {
-                          _showAddTagDialog();
-                        } else {
-                          setState(() {
-                            _selectedModuleId = val;
-                            _selectedModuleName = _modules.firstWhere((m) => m['id'].toString() == val)['name'].toString();
-                          });
-                        }
-                      },
-                    ),
+            _isLoadingModules
+                ? const LinearProgressIndicator()
+                : Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              hint: const Text('Select Subject Tag (Optional)'),
+                              value: _selectedModuleId,
+                              items: _modules.map((m) {
+                                return DropdownMenuItem<String>(
+                                  value: m['id'].toString(),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        margin: const EdgeInsets.only(right: 10),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _getColorForModule(m['name'].toString()),
+                                        ),
+                                      ),
+                                      Text(m['name'].toString()),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                setState(() {
+                                  _selectedModuleId = val;
+                                  _selectedModuleName = _modules.firstWhere((m) => m['id'].toString() == val)['name'];
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_selectedModuleId != null)
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () => setState(() {
+                            _selectedModuleId = null;
+                            _selectedModuleName = null;
+                          }),
+                        ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.create_new_folder, color: Color(0xff5732a3), size: 28),
+                        onPressed: _showCreateTagDialog,
+                      ),
+                    ],
                   ),
-            ),
-            const SizedBox(height: 30),
-
-            if (_isTimerMode) _buildTimerView() else _buildManualView(),
-
-            const SizedBox(height: 30),
-
-            // Location Input
+            const SizedBox(height: 16),
+            if (!_isTimerMode) ...[
+              TextField(
+                controller: _durationController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: 'Duration (Minutes)',
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: const Icon(Icons.timer_outlined, color: Colors.grey),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             TextField(
               controller: _locationController,
               decoration: InputDecoration(
-                hintText: 'Location (e.g. UTown Starbucks)',
-                filled: true, fillColor: Colors.white,
+                hintText: 'Location (e.g. UTown Library, Home)',
+                filled: true,
+                fillColor: Colors.white,
                 prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.grey),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
-            const SizedBox(height: 30),
-
-            // Submit Button
+            const SizedBox(height: 40),
+            _isTimerMode ? _buildTimerView() : const SizedBox.shrink(),
+            const SizedBox(height: 40),
             SizedBox(
-              width: double.infinity, height: 54,
+              width: double.infinity,
+              height: 54,
               child: ElevatedButton(
                 onPressed: _isSubmitting || (_isTimerMode && _isRunning) ? null : _submitSession,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff5732a3), foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xff5732a3),
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: _isSubmitting 
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('Save Session', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                child: _isSubmitting ? const CircularProgressIndicator(color: Colors.white) : const Text('Save Session', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -319,7 +435,8 @@ class _RecordScreenState extends State<RecordScreen> {
     return Column(
       children: [
         Container(
-          height: 200, width: 200,
+          height: 200,
+          width: 200,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: _isRunning ? const Color(0xffb73229) : const Color(0xff5732a3), width: 8),
@@ -332,8 +449,7 @@ class _RecordScreenState extends State<RecordScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (_accumulatedTime > Duration.zero && !_isRunning)
-               IconButton(icon: const Icon(Icons.replay, size: 32, color: Colors.grey), onPressed: _resetTimer),
+            if (_accumulatedTime > Duration.zero && !_isRunning) IconButton(icon: const Icon(Icons.replay, size: 32, color: Colors.grey), onPressed: _resetTimer),
             const SizedBox(width: 20),
             ElevatedButton.icon(
               onPressed: _toggleTimer,
@@ -346,44 +462,8 @@ class _RecordScreenState extends State<RecordScreen> {
               ),
             ),
           ],
-        )
+        ),
       ],
-    );
-  }
-
-  Widget _buildManualView() {
-    return TextField(
-      controller: _durationController,
-      keyboardType: TextInputType.number,
-      decoration: InputDecoration(
-        hintText: 'Duration in Minutes (e.g. 120)',
-        filled: true, fillColor: Colors.white,
-        prefixIcon: const Icon(Icons.timer_outlined, color: Colors.grey),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-      ),
-    );
-  }
-
-  void _showAddTagDialog() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('New Tag'),
-        content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'e.g. CS2040S')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                _createNewTag(controller.text);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
     );
   }
 }
