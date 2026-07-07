@@ -318,6 +318,7 @@ class _FeedScreenState extends State<FeedScreen> {
       backgroundColor: const Color(0xfff8f9fa),
       appBar: AppBar(
         title: const Text('Activity Feed', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xff5732a3), 
         actions: [IconButton(icon: const Icon(Icons.person_add_alt_1, color: Colors.white), onPressed: _showFindFriendsModal)],
       ),

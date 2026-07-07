@@ -168,6 +168,7 @@ class _TasksScreenState extends State<TasksScreen> {
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text('Workspace Tasks', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xff5732a3),
         elevation: 0,
         actions: [

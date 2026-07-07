@@ -193,6 +193,7 @@ class _RecordScreenState extends State<RecordScreen> {
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text('Record Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xff5732a3),
         elevation: 0,
       ),
