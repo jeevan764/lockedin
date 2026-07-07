@@ -284,14 +284,14 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return colors[hash.abs() % colors.length];
   }
 
-  /// Logs the user out securely from Supabase and wipes the navigation stack back to login screen
+  /// Logs the user out securely from Supabase and safely cleans navigation paths
   Future<void> _handleLogout() async {
     try {
-      await _supabase.auth.signOut();
+      await _supabase.auth.signOut(); // Logs out session token cleanly
       if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
+        // Use the root navigator instance to cleanly swap the entire bottom navigation tree out for the login page
+        Navigator.of(context, rootNavigator: true).pushReplacement(
           MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (Route<dynamic> route) => false,
         );
       }
     } catch (e) {
@@ -302,6 +302,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       }
     }
   }
+
+  
 
   // --- UI BUILDERS ---
   @override
