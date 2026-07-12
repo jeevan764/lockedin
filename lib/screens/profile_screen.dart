@@ -1,5 +1,7 @@
 // lib/screens/profile_screen.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'dashboard_screen.dart';
@@ -13,12 +15,15 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
+  final ImagePicker _picker = ImagePicker();
   late TabController _subTabController;
 
   bool _isLoading = true;
+  bool _isUploading = false;
   String _username = 'User';
   int _totalXp = 0;
   int _currentStreak = 0;
+  String? _avatarUrl;
 
   List<dynamic> _myHistory = [];
   List<Map<String, dynamic>> _modules = [];
@@ -66,8 +71,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
-      final profileData = await _supabase.from('profiles').select('username').eq('id', user.id).single();
+      // Pull down profile metadata fields including user public avatar_url
+      final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
       _username = profileData['username'] ?? 'User';
+      _avatarUrl = profileData['avatar_url'];
 
       // Fetch follow data and resolve nested profile usernames
       final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
@@ -121,6 +128,61 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
+  /// Selects profile image from device gallery and synchronizes storage upload pipeline
+  Future<void> _pickAndUploadImage() async {
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 400,
+      maxHeight: 400,
+      imageQuality: 85,
+    );
+
+    if (pickedFile == null) return;
+
+    setState(() => _isUploading = true);
+
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      final File file = File(pickedFile.path);
+      final String fileExtension = pickedFile.path.split('.').last;
+      final String filePath = '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
+
+      // 1. Upload binary stream package block payload straight to 'avatars' storage space bucket
+      await _supabase.storage.from('avatars').upload(
+            filePath,
+            file,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+          );
+
+      // 2. Fetch public permanent destination pointer path
+      final String publicUrl = _supabase.storage.from('avatars').getPublicUrl(filePath);
+
+      // 3. Upsert path details record update into database profile doc
+      await _supabase.from('profiles').upsert({
+        'id': user.id,
+        'avatar_url': publicUrl,
+        'username': _username,
+      });
+
+      if (mounted) {
+        setState(() => _avatarUrl = publicUrl);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile picture updated successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
   int _calculateStreak(Set<String> uniqueDates) {
     int streak = 0;
     DateTime checkDate = DateTime.now();
@@ -162,7 +224,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return colors[hash.abs() % colors.length];
   }
 
-  // Strava-style bottom panel sheet for interactions
   void _showSocialListModal(String title, List<String> usernames) {
     showModalBottomSheet(
       context: context,
@@ -347,10 +408,77 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
                   child: Column(
                     children: [
-                      const CircleAvatar(radius: 36, backgroundColor: Colors.white, child: Icon(Icons.person, size: 40, color: Color(0xff5732a3))),
+                      // --- PROFILE AVATAR WIDGET STACK ---
+                      Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          CircleAvatar(
+                            radius: 36,
+                            backgroundColor: Colors.white,
+                            backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+                            child: _avatarUrl == null
+                                ? const Icon(Icons.person, size: 40, color: Color(0xff5732a3))
+                                : null,
+                          ),
+                          if (_isUploading)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black45,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: GestureDetector(
+                              onTap: _isUploading ? null : _pickAndUploadImage,
+                              child: const CircleAvatar(
+                                radius: 12,
+                                backgroundColor: Colors.white,
+                                child: Icon(Icons.camera_alt, size: 12, color: Color(0xff5732a3)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 10),
-                      Text('@$_username', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text(userEmail, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+
+                      // --- FLEXIBLE TEXT OVERFLOW PROTECTION ---
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '@$_username', 
+                              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              userEmail, 
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 14),
                       
                       // Strava-Style Interactive Metrics Row
@@ -573,7 +701,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black)),
+                          Expanded(
+                            child: Text(
+                              entry.key, 
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           Text('${entry.value} mins (${(fraction * 100).toStringAsFixed(0)}%)', style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
                         ],
                       ),
@@ -676,7 +812,14 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         leading: const Icon(Icons.history, color: Colors.grey),
         title: Row(
           children: [
-            Text(taskName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            Expanded(
+              child: Text(
+                taskName, 
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
             if (moduleName.isNotEmpty) ...[
               const SizedBox(width: 8),
               Container(
@@ -686,12 +829,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: _getColorForModule(moduleName)),
                 ),
-                child: Text(moduleName, style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 11)),
+                child: Text(
+                  moduleName, 
+                  style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
               ),
             ]
           ],
         ),
-        subtitle: Text('${session['duration_minutes']} mins • ${session['location']} • +${session['xp_earned']} XP', style: const TextStyle(fontSize: 12)),
+        subtitle: Text(
+          '${session['duration_minutes']} mins • ${session['location']} • +${session['xp_earned']} XP', 
+          style: const TextStyle(fontSize: 12),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

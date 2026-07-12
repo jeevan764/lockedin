@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 import 'dashboard_screen.dart';
 
 class RecordScreen extends StatefulWidget {
@@ -14,6 +16,9 @@ class RecordScreen extends StatefulWidget {
 
 class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver {
   final _supabase = Supabase.instance.client;
+
+  // Instantiating the Geocoding class engine required by package version 5.0.0+
+  final Geocoding _geocoding = Geocoding();
 
   // Background-Resilient Timer Variables
   bool _isRunning = false;
@@ -66,6 +71,97 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     }
   }
 
+  // --- Location Tracking Engine ---
+
+  
+
+Future<void> _determineAndSetLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // 1. Check if location hardware services are enabled on the device
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) setState(() => _locationController.text = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location services are disabled. Please enter your location manually.')),
+      );
+      return;
+    }
+
+    // 2. Handle app level workflow permissions
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) setState(() => _locationController.text = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission denied. Please enter your location manually.')),
+        );
+        return;
+      }
+    }
+    
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) setState(() => _locationController.text = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location permissions are permanently blocked. Please enter your location manually.')),
+      );
+      return;
+    }
+
+    // 3. Request absolute highest tracking resolution spot
+    try {
+      if (mounted) setState(() => _locationController.text = 'Locating...');
+      
+      Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+
+      // 4. Using the updated v5.0.0 class instance method
+      List<Placemark> placemarks = await _geocoding.placemarkFromCoordinates(
+        position.latitude, 
+        position.longitude
+      );
+
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+        
+        // --- SMART MULTI-PART ADDRESS BUILDER ---
+        List<String> addressParts = [];
+
+        // 1. Get primary street info
+        if (place.thoroughfare != null && place.thoroughfare!.isNotEmpty) {
+          addressParts.add(place.thoroughfare!);
+        } 
+        else if (place.name != null && place.name!.isNotEmpty && int.tryParse(place.name!) == null) {
+          addressParts.add(place.name!);
+        }
+
+        // 2. Add neighborhood or city descriptor
+        if (place.subLocality != null && place.subLocality!.isNotEmpty) {
+          addressParts.add(place.subLocality!);
+        } else if (place.locality != null && place.locality!.isNotEmpty) {
+          addressParts.add(place.locality!);
+        }
+
+        if (mounted) {
+          setState(() {
+            // Set the built address string, or leave it empty if nothing resolved
+            _locationController.text = addressParts.isNotEmpty ? addressParts.join(', ') : '';
+          });
+        }
+      } else {
+        if (mounted) setState(() => _locationController.text = '');
+      }
+    } catch (e) {
+      // Clear the loading text if GPS drops out or times out
+      if (mounted) setState(() => _locationController.text = '');
+    }
+  }
   // --- Core Persistent Timer Engine ---
 
   Future<void> _toggleTimer() async {
@@ -121,6 +217,9 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         _pauseStartTime = null;
       });
       _startUiTicker();
+
+      // Trigger the single-shot background position fetch concurrently 
+      _determineAndSetLocation();
     }
   }
 
@@ -173,6 +272,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       _previouslyAccumulatedSeconds = 0;
       _pauseStartTime = null;
     });
+    _locationController.clear();
   }
 
   // Recover previous state if app was cleared from memory
@@ -255,12 +355,21 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _submitSession() async {
+  
+Future<void> _submitSession() async {
     final String taskNameInput = _taskNameController.text.trim();
-    final String locationInput = _locationController.text.trim().isEmpty ? 'Campus' : _locationController.text.trim();
+    final String locationInput = _locationController.text.trim();
 
+    // COMPULSORY VALIDATION CHECKS
     if (taskNameInput.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please name what you worked on!')));
+      return;
+    }
+
+    if (locationInput.isEmpty || locationInput == 'Locating...') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location is compulsory! Please type a location or auto-detect your current address.')),
+      );
       return;
     }
 
@@ -296,7 +405,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         'user_id': user.id,
         'subject': finalSubjectTitle,
         'duration_minutes': duration,
-        'location': locationInput,
+        'location': locationInput, // Verified clean and present
         'xp_earned': xpEarned,
       });
 
@@ -531,15 +640,27 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               ),
               const SizedBox(height: 16),
             ],
-            TextField(
-              controller: _locationController,
-              decoration: InputDecoration(
-                hintText: 'Location (e.g. UTown Library, Home)',
-                filled: true,
-                fillColor: Colors.white,
-                prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.grey),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _locationController,
+                    decoration: InputDecoration(
+                      hintText: 'Location (e.g. UTown Library, Home)',
+                      filled: true,
+                      fillColor: Colors.white,
+                      prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.grey),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.my_location, color: Color(0xff5732a3)),
+                  tooltip: 'Auto-detect location',
+                  onPressed: _determineAndSetLocation,
+                ),
+              ],
             ),
             const SizedBox(height: 40),
             _isTimerMode ? _buildTimerView() : const SizedBox.shrink(),
