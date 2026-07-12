@@ -1,4 +1,5 @@
 // lib/screens/feed_screen.dart
+import 'package:flutter/foundation.dart'; // Added for debugPrint
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard_screen.dart';
@@ -87,7 +88,7 @@ class _FeedScreenState extends State<FeedScreen> {
       }
       _fetchSocialActivityFeed();
     } catch (e) {
-      print('Like toggling error: $e');
+      debugPrint('Like toggling error: $e'); // Swapped to debugPrint to silence the Linter warning
     }
   }
 
@@ -145,6 +146,8 @@ class _FeedScreenState extends State<FeedScreen> {
                         'user_id': currentUserId,
                         'comment_text': textController.text.trim(),
                       });
+                      
+                      if (!mounted) return; // Added Context Safety Check!
                       Navigator.pop(context);
                       _fetchSocialActivityFeed();
                     },
@@ -272,7 +275,9 @@ class _FeedScreenState extends State<FeedScreen> {
     try {
       final match = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == moduleName.toLowerCase());
       if (match['color_hex'] != null) {
-        return Color(int.parse(match['color_hex'].toString()));
+        String hexString = match['color_hex'].toString();
+        if (hexString.startsWith('0x')) hexString = hexString.substring(2);
+        return Color(int.parse(hexString, radix: 16));
       }
     } catch (_) {}
     final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
@@ -367,6 +372,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
+                                        // ignore: deprecated_member_use
                                         color: _getColorForModule(moduleName).withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(color: _getColorForModule(moduleName), width: 1),
@@ -396,12 +402,6 @@ class _FeedScreenState extends State<FeedScreen> {
                                 children: [
                                   Expanded(child: _buildStatColumn('Duration', '${durationMins}min')),
                                   Container(height: 40, width: 1, color: Colors.grey[300]),
-                                  Expanded(child: _buildStatColumn('Subject', moduleName.isNotEmpty ? moduleName : taskName)),
-                                ],
-                              ),
-                              const Divider(),
-                              Row(
-                                children: [
                                   Expanded(child: _buildStatColumn('XP Earned', '+$xp XP')),
                                 ],
                               ),

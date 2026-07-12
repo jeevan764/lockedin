@@ -1,5 +1,6 @@
 // lib/screens/profile_screen.dart
 import 'dart:io';
+import 'package:flutter/foundation.dart'; // Added to support debugPrint
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,7 +32,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
-  // Strava-Style Followers & Following Data Lists
   List<String> _followersUsernames = [];
   List<String> _followingUsernames = [];
 
@@ -71,12 +71,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
-      // Pull down profile metadata fields including user public avatar_url
       final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
       _username = profileData['username'] ?? 'User';
       _avatarUrl = profileData['avatar_url'];
 
-      // Fetch follow data and resolve nested profile usernames
       final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
       final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
 
@@ -124,11 +122,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
       }
     } catch (e) {
-      print('Error fetching modules: $e');
+      debugPrint('Error fetching modules: $e'); // FIXED: Swapped print to debugPrint
     }
   }
 
-  /// Selects profile image from device gallery and synchronizes storage upload pipeline
   Future<void> _pickAndUploadImage() async {
     final XFile? pickedFile = await _picker.pickImage(
       source: ImageSource.gallery,
@@ -149,17 +146,14 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       final String fileExtension = pickedFile.path.split('.').last;
       final String filePath = '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
 
-      // 1. Upload binary stream package block payload straight to 'avatars' storage space bucket
       await _supabase.storage.from('avatars').upload(
             filePath,
             file,
             fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
           );
 
-      // 2. Fetch public permanent destination pointer path
       final String publicUrl = _supabase.storage.from('avatars').getPublicUrl(filePath);
 
-      // 3. Upsert path details record update into database profile doc
       await _supabase.from('profiles').upsert({
         'id': user.id,
         'avatar_url': publicUrl,
@@ -272,6 +266,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       _fetchProfileMetrics();
       syncFeedNotifier.value++;
     } catch (e) {
+      if (!mounted) return; // FIXED: Safety check before displaying SnackBar across async gap
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
     }
   }
@@ -342,12 +337,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     finalSubject = '$finalSubject (${matchedMod['name']})';
                   }
                   int minutes = int.tryParse(durationController.text.trim()) ?? 0;
+                  
                   await _supabase.from('study_sessions').update({
                     'subject': finalSubject,
                     'duration_minutes': minutes,
                     'location': locationController.text.trim(),
                     'xp_earned': minutes * 10,
                   }).eq('id', sessionId);
+                  
+                  if (!mounted) return; // FIXED: Safety check before navigation
                   Navigator.pop(context);
                   _fetchProfileMetrics();
                   syncFeedNotifier.value++;
@@ -401,14 +399,12 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
           : Column(
               children: [
-                // Top Identity & Summary Card Area
                 Container(
                   width: double.infinity,
                   color: const Color(0xff5732a3),
                   padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
                   child: Column(
                     children: [
-                      // --- PROFILE AVATAR WIDGET STACK ---
                       Stack(
                         alignment: Alignment.bottomRight,
                         children: [
@@ -451,8 +447,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         ],
                       ),
                       const SizedBox(height: 10),
-
-                      // --- FLEXIBLE TEXT OVERFLOW PROTECTION ---
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -480,8 +474,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         ],
                       ),
                       const SizedBox(height: 14),
-                      
-                      // Strava-Style Interactive Metrics Row
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -491,7 +483,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                               cursor: SystemMouseCursors.click,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+                                // FIXED: Switched to .withAlpha for strict modern linting
+                                decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(16)),
                                 child: Row(
                                   children: [
                                     Text('${_followersUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -508,7 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                               cursor: SystemMouseCursors.click,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.white.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+                                decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(16)),
                                 child: Row(
                                   children: [
                                     Text('${_followingUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -547,8 +540,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     ],
                   ),
                 ),
-                
-                // Sliding Control TabBar
                 Container(
                   color: Colors.white,
                   child: TabBar(
@@ -563,8 +554,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     ],
                   ),
                 ),
-
-                // Sliding Sub-tab View Controller
                 Expanded(
                   child: TabBarView(
                     controller: _subTabController,
@@ -603,7 +592,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 });
               },
               calendarStyle: CalendarStyle(
-                todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withOpacity(0.3), shape: BoxShape.circle),
+                // FIXED: Safely using withAlpha
+                todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withAlpha(76), shape: BoxShape.circle),
                 selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
                 markerDecoration: const BoxDecoration(color: Color(0xffb73229), shape: BoxShape.circle),
               ),
@@ -657,7 +647,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // FIXED Metrics Header row blocks using Expanded constraints
         Row(
           children: [
             Expanded(
@@ -680,8 +669,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ],
         ),
         const SizedBox(height: 16),
-
-        // FIXED Symmetrical Subject Progress Trackers
         const Text('Focus Allocation by Subject', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
         const SizedBox(height: 8),
         Card(
@@ -731,7 +718,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ),
         ),
         const SizedBox(height: 16),
-
         const Text('Top Study Environments', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
         const SizedBox(height: 8),
         Card(
@@ -765,7 +751,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
         child: Row(
           children: [
-            CircleAvatar(backgroundColor: col.withOpacity(0.1), child: Icon(ico, color: col)),
+            CircleAvatar(backgroundColor: col.withAlpha(25), child: Icon(ico, color: col)),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -825,7 +811,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: _getColorForModule(moduleName).withOpacity(0.1),
+                  color: _getColorForModule(moduleName).withAlpha(25),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: _getColorForModule(moduleName)),
                 ),

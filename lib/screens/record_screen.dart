@@ -1,5 +1,6 @@
 // lib/screens/record_screen.dart
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -17,8 +18,9 @@ class RecordScreen extends StatefulWidget {
 class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver {
   final _supabase = Supabase.instance.client;
 
-  // Instantiating the Geocoding class engine required by package version 5.0.0+
-  final Geocoding _geocoding = Geocoding();
+  // Do not construct Geocoding here. The geocoding plugin has no web
+  // implementation, and constructing it while RecordScreen is created can
+  // throw `Unexpected null value` before the widget gets a chance to build.
 
   // Background-Resilient Timer Variables
   bool _isRunning = false;
@@ -45,14 +47,14 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // Register lifecycle listener
+    WidgetsBinding.instance.addObserver(this); 
     _fetchModules();
-    _restoreTimerState(); // Auto-recover state on cold launch or component redraw
+    _restoreTimerState(); 
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // Clean up lifecycle observer
+    WidgetsBinding.instance.removeObserver(this); 
     _uiTicker?.cancel();
     _taskNameController.dispose();
     _durationController.dispose();
@@ -60,41 +62,36 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     super.dispose();
   }
 
-  // Intercept phone background transitions, locked screens, and user returns
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_isTimerMode || !_isRunning) return;
 
     if (state == AppLifecycleState.resumed) {
-      // User unlocked their phone or returned to the workspace mid-session
       _autoPauseOnReturn();
     }
   }
 
   // --- Location Tracking Engine ---
-
-  
-
-Future<void> _determineAndSetLocation() async {
+  Future<void> _determineAndSetLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
 
-    // 1. Check if location hardware services are enabled on the device
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      if (mounted) setState(() => _locationController.text = '');
+      if (!mounted) return;
+      setState(() => _locationController.text = '');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Location services are disabled. Please enter your location manually.')),
       );
       return;
     }
 
-    // 2. Handle app level workflow permissions
     permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        if (mounted) setState(() => _locationController.text = '');
+        if (!mounted) return;
+        setState(() => _locationController.text = '');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Location permission denied. Please enter your location manually.')),
         );
@@ -103,14 +100,14 @@ Future<void> _determineAndSetLocation() async {
     }
     
     if (permission == LocationPermission.deniedForever) {
-      if (mounted) setState(() => _locationController.text = '');
+      if (!mounted) return;
+      setState(() => _locationController.text = '');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Location permissions are permanently blocked. Please enter your location manually.')),
       );
       return;
     }
 
-    // 3. Request absolute highest tracking resolution spot
     try {
       if (mounted) setState(() => _locationController.text = 'Locating...');
       
@@ -121,58 +118,89 @@ Future<void> _determineAndSetLocation() async {
         ),
       );
 
-      // 4. Using the updated v5.0.0 class instance method
-      List<Placemark> placemarks = await _geocoding.placemarkFromCoordinates(
-        position.latitude, 
-        position.longitude
+      // The geocoding package only supplies native implementations for
+      // Android/iOS/macOS. On web, retain the detected coordinates instead of
+      // constructing Geocoding, whose missing platform instance caused the
+      // red `Unexpected null value` screen.
+      if (kIsWeb) {
+        if (mounted) {
+          setState(() {
+            _locationController.text =
+                '${position.latitude.toStringAsFixed(5)}, '
+                '${position.longitude.toStringAsFixed(5)}';
+          });
+        }
+        return;
+      }
+
+      // Construct Geocoding lazily only after the platform check. This keeps
+      // RecordScreen safe to create in a web build.
+      final geocoding = Geocoding();
+      final List<Placemark> placemarks =
+          await geocoding.placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
       );
 
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks.first;
-        
-        // --- SMART MULTI-PART ADDRESS BUILDER ---
         List<String> addressParts = [];
 
-        // 1. Get primary street info
-        if (place.thoroughfare != null && place.thoroughfare!.isNotEmpty) {
-          addressParts.add(place.thoroughfare!);
-        } 
-        else if (place.name != null && place.name!.isNotEmpty && int.tryParse(place.name!) == null) {
-          addressParts.add(place.name!);
+        // Safely unwrapped to prevent ANY null crash
+        final thoroughfare = place.thoroughfare ?? '';
+        final placeName = place.name ?? '';
+        final subLocality = place.subLocality ?? '';
+        final locality = place.locality ?? '';
+
+        if (thoroughfare.isNotEmpty) {
+          addressParts.add(thoroughfare);
+        } else if (placeName.isNotEmpty && int.tryParse(placeName) == null) {
+          addressParts.add(placeName);
         }
 
-        // 2. Add neighborhood or city descriptor
-        if (place.subLocality != null && place.subLocality!.isNotEmpty) {
-          addressParts.add(place.subLocality!);
-        } else if (place.locality != null && place.locality!.isNotEmpty) {
-          addressParts.add(place.locality!);
+        if (subLocality.isNotEmpty) {
+          addressParts.add(subLocality);
+        } else if (locality.isNotEmpty) {
+          addressParts.add(locality);
         }
 
         if (mounted) {
           setState(() {
-            // Set the built address string, or leave it empty if nothing resolved
             _locationController.text = addressParts.isNotEmpty ? addressParts.join(', ') : '';
           });
         }
       } else {
         if (mounted) setState(() => _locationController.text = '');
       }
-    } catch (e) {
-      // Clear the loading text if GPS drops out or times out
-      if (mounted) setState(() => _locationController.text = '');
+    } catch (e, stackTrace) {
+      debugPrint('Location lookup failed: $e');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        setState(() => _locationController.text = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not detect an address. Please enter your location manually.',
+            ),
+          ),
+        );
+      }
     }
   }
-  // --- Core Persistent Timer Engine ---
 
+  // --- Core Persistent Timer Engine ---
   Future<void> _toggleTimer() async {
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now();
 
     if (_isRunning) {
       if (_isPaused) {
-        // RESUME ACTION
-        final pauseDuration = now.difference(_pauseStartTime!);
-        final adjustedStartTime = _startTime!.add(pauseDuration);
+        // RESUME ACTION (Safely fallback to 'now' to prevent null crash)
+        final safePauseStart = _pauseStartTime ?? now;
+        final safeStart = _startTime ?? now;
+        
+        final pauseDuration = now.difference(safePauseStart);
+        final adjustedStartTime = safeStart.add(pauseDuration);
 
         await prefs.setBool('timer_is_paused', false);
         await prefs.setString('timer_start_time', adjustedStartTime.toIso8601String());
@@ -187,7 +215,8 @@ Future<void> _determineAndSetLocation() async {
       } else {
         // MANUAL PAUSE ACTION
         _uiTicker?.cancel();
-        final currentChunk = now.difference(_startTime!).inSeconds;
+        final safeStart = _startTime ?? now;
+        final currentChunk = now.difference(safeStart).inSeconds;
         final totalSecs = _previouslyAccumulatedSeconds + currentChunk;
 
         await prefs.setBool('timer_is_paused', true);
@@ -217,8 +246,6 @@ Future<void> _determineAndSetLocation() async {
         _pauseStartTime = null;
       });
       _startUiTicker();
-
-      // Trigger the single-shot background position fetch concurrently 
       _determineAndSetLocation();
     }
   }
@@ -230,7 +257,8 @@ Future<void> _determineAndSetLocation() async {
     final now = DateTime.now();
     final prefs = await SharedPreferences.getInstance();
 
-    final currentChunk = now.difference(_startTime!).inSeconds;
+    final safeStart = _startTime ?? now;
+    final currentChunk = now.difference(safeStart).inSeconds;
     final totalSecs = _previouslyAccumulatedSeconds + currentChunk;
 
     await prefs.setBool('timer_is_paused', true);
@@ -248,8 +276,9 @@ Future<void> _determineAndSetLocation() async {
     _uiTicker?.cancel();
     _uiTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _isRunning && !_isPaused && _startTime != null) {
+        final safeStart = _startTime ?? DateTime.now();
         setState(() {
-          _elapsedSeconds = _previouslyAccumulatedSeconds + DateTime.now().difference(_startTime!).inSeconds;
+          _elapsedSeconds = _previouslyAccumulatedSeconds + DateTime.now().difference(safeStart).inSeconds;
         });
       }
     });
@@ -275,7 +304,6 @@ Future<void> _determineAndSetLocation() async {
     _locationController.clear();
   }
 
-  // Recover previous state if app was cleared from memory
   Future<void> _restoreTimerState() async {
     final prefs = await SharedPreferences.getInstance();
     final bool isRunning = prefs.getBool('timer_is_running') ?? false;
@@ -311,18 +339,24 @@ Future<void> _determineAndSetLocation() async {
   }
 
   // --- Data Infrastructure Tasks ---
-
   Future<void> _fetchModules() async {
     try {
       final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final data = await _supabase.from('task_modules').select().eq('user_id', user.id);
-        if (mounted) {
-          setState(() {
-            _modules = List<Map<String, dynamic>>.from(data);
-            _isLoadingModules = false;
-          });
-        }
+      if (user == null) {
+        if (mounted) setState(() => _isLoadingModules = false);
+        return;
+      }
+
+      final data = await _supabase
+          .from('task_modules')
+          .select()
+          .eq('user_id', user.id);
+
+      if (mounted) {
+        setState(() {
+          _modules = List<Map<String, dynamic>>.from(data);
+          _isLoadingModules = false;
+        });
       }
     } catch (e) {
       if (mounted) setState(() => _isLoadingModules = false);
@@ -334,6 +368,7 @@ Future<void> _determineAndSetLocation() async {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
       
+      // ignore: deprecated_member_use
       final String hexString = '0x${chosenColor.value.toRadixString(16)}';
 
       final response = await _supabase.from('task_modules').insert({
@@ -351,16 +386,15 @@ Future<void> _determineAndSetLocation() async {
         syncTasksNotifier.value++;
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create tag: $e')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create tag: $e')));
     }
   }
 
-  
-Future<void> _submitSession() async {
+  Future<void> _submitSession() async {
     final String taskNameInput = _taskNameController.text.trim();
     final String locationInput = _locationController.text.trim();
 
-    // COMPULSORY VALIDATION CHECKS
     if (taskNameInput.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please name what you worked on!')));
       return;
@@ -405,21 +439,22 @@ Future<void> _submitSession() async {
         'user_id': user.id,
         'subject': finalSubjectTitle,
         'duration_minutes': duration,
-        'location': locationInput, // Verified clean and present
+        'location': locationInput, 
         'xp_earned': xpEarned,
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Session saved! +$xpEarned XP earned.'), backgroundColor: Colors.green));
-        await _resetTimer();
-        _taskNameController.clear();
-        _durationController.clear();
-        _locationController.clear();
+      if (!mounted) return;
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Session saved! +$xpEarned XP earned.'), backgroundColor: Colors.green));
+      await _resetTimer();
+      _taskNameController.clear();
+      _durationController.clear();
+      _locationController.clear();
 
-        syncFeedNotifier.value++;
-        syncProfileNotifier.value++;
-        syncTasksNotifier.value++;
-      }
+      syncFeedNotifier.value++;
+      syncProfileNotifier.value++;
+      syncTasksNotifier.value++;
+      
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
@@ -431,7 +466,9 @@ Future<void> _submitSession() async {
     try {
       final match = _modules.firstWhere((m) => m['name'].toString().toLowerCase() == moduleName.toLowerCase());
       if (match['color_hex'] != null) {
-        return Color(int.parse(match['color_hex'].toString()));
+        String hexString = match['color_hex'].toString();
+        if (hexString.startsWith('0x')) hexString = hexString.substring(2);
+        return Color(int.parse(hexString, radix: 16));
       }
     } catch (_) {}
     int hash = moduleName.hashCode;
@@ -585,6 +622,7 @@ Future<void> _submitSession() async {
                                 return DropdownMenuItem<String>(
                                   value: m['id'].toString(),
                                   child: Row(
+                                    mainAxisSize: MainAxisSize.min, // Safely bounds the row
                                     children: [
                                       Container(
                                         width: 12,
