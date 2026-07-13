@@ -58,9 +58,10 @@ class _FeedScreenState extends State<FeedScreen> {
         followedIds.add(currentUserId);
       }
 
+      // UPDATED: Included avatar_url inside the relational inner profiles query
       final feedResponse = await _supabase
           .from('study_sessions')
-          .select('*, profiles:user_id(username), session_likes(user_id), session_comments(*, profiles:user_id(username))')
+          .select('*, profiles:user_id(username, avatar_url), session_likes(user_id), session_comments(*, profiles:user_id(username, avatar_url))')
           .or(followedIds.map((id) => 'user_id.eq.$id').join(','))
           .order('created_at', ascending: false)
           .limit(25);
@@ -88,7 +89,7 @@ class _FeedScreenState extends State<FeedScreen> {
       }
       _fetchSocialActivityFeed();
     } catch (e) {
-      debugPrint('Like toggling error: $e'); // Swapped to debugPrint to silence the Linter warning
+      debugPrint('Like toggling error: $e');
     }
   }
 
@@ -120,8 +121,19 @@ class _FeedScreenState extends State<FeedScreen> {
                         itemBuilder: (context, index) {
                           final c = comments[index] as Map<String, dynamic>;
                           final author = c['profiles']?['username'] ?? 'User';
+                          final commentAvatarUrl = c['profiles']?['avatar_url'] as String?;
+
                           return ListTile(
                             dense: true,
+                            // UPDATED: Added real-time user avatars inside the comments rows list
+                            leading: CircleAvatar(
+                              radius: 14,
+                              backgroundColor: const Color(0xff5732a3),
+                              backgroundImage: commentAvatarUrl != null ? NetworkImage(commentAvatarUrl) : null,
+                              child: commentAvatarUrl == null 
+                                  ? const Icon(Icons.person, size: 14, color: Colors.white) 
+                                  : null,
+                            ),
                             title: Text(author, style: const TextStyle(fontWeight: FontWeight.bold)),
                             subtitle: Text(c['comment_text'] ?? ''),
                           );
@@ -147,7 +159,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         'comment_text': textController.text.trim(),
                       });
                       
-                      if (!mounted) return; // Added Context Safety Check!
+                      if (!mounted) return;
                       Navigator.pop(context);
                       _fetchSocialActivityFeed();
                     },
@@ -318,6 +330,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     itemBuilder: (context, index) {
                       final item = _feedItems[index] as Map<String, dynamic>;
                       final username = item['profiles']?['username'] ?? 'Scholar';
+                      final avatarUrl = item['profiles']?['avatar_url'] as String?; // Added avatar URL configuration map row reference
                       final List<dynamic> likes = item['session_likes'] ?? [];
                       final List<dynamic> comments = item['session_comments'] ?? [];
                       final isLiked = likes.any((l) => l['user_id'] == currentUserId);
@@ -351,7 +364,14 @@ class _FeedScreenState extends State<FeedScreen> {
                             children: [
                               Row(
                                 children: [
-                                  const CircleAvatar(backgroundColor: Color(0xff3f6b8e), child: Icon(Icons.person, color: Colors.white)),
+                                  // UPDATED: Loads profile image or defaults to color backup widget seamlessly
+                                  CircleAvatar(
+                                    backgroundColor: const Color(0xff3f6b8e),
+                                    backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                                    child: avatarUrl == null 
+                                        ? const Icon(Icons.person, color: Colors.white) 
+                                        : null,
+                                  ),
                                   const SizedBox(width: 12),
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,8 +392,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
-                                        // ignore: deprecated_member_use
-                                        color: _getColorForModule(moduleName).withOpacity(0.1),
+                                        color: _getColorForModule(moduleName).withAlpha(25),
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(color: _getColorForModule(moduleName), width: 1),
                                       ),

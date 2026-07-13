@@ -359,6 +359,206 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
+
+  Widget _buildTierProgressCard() {
+    int currentLevel = GamificationEngine.getLevel(_totalXp);
+    int currentLevelMinXp = GamificationEngine.getXpThresholdForCurrentLevel(currentLevel);
+    int nextLevelMaxXp = GamificationEngine.getXpNeededForNextLevel(currentLevel);
+    
+    int xpInCurrentLevel = _totalXp - currentLevelMinXp;
+    int xpRequiredForLevelUp = nextLevelMaxXp - currentLevelMinXp;
+    
+    double progressFraction = xpRequiredForLevelUp > 0 
+        ? (xpInCurrentLevel / xpRequiredForLevelUp).clamp(0.0, 1.0) 
+        : 1.0;
+        
+    var tier = GamificationEngine.getTierDetails(currentLevel);
+
+    return GestureDetector(
+      onTap: () => _showTierInfoModal(context, currentLevel),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(30),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: tier['color'],
+                    child: Text('$currentLevel', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tier['name'].toUpperCase(),
+                          style: TextStyle(color: tier['color'], fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$xpInCurrentLevel / $xpRequiredForLevelUp XP to Level ${currentLevel + 1}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(tier['icon'], color: Colors.white60, size: 18),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progressFraction,
+                  backgroundColor: Colors.white12,
+                  color: tier['color'],
+                  minHeight: 5,
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showTierInfoModal(BuildContext context, int userCurrentLevel) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85
+            ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag Indicator handle
+              const SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              
+              const Text(
+                'LockedIn Productivity Tiers',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3)),
+              ),
+              const SizedBox(height: 4),
+              Text('Level up your focus to unlock elite status metrics.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              const Divider(height: 24),
+
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  children: [
+                    // --- SECTION 1: HOW TO EARN XP ---
+                    const Text('How to Earn XP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+                    const SizedBox(height: 8),
+                    _buildXpRuleRow(Icons.timer_outlined, 'Focus Sessions', 'Earn 10 XP for every 10 minutes of tracked activity.'),
+                    _buildXpRuleRow(Icons.local_fire_department_outlined, 'Streak Multipliers', 'Keep up your daily streak to trigger bonus XP payouts.'),
+                    _buildXpRuleRow(Icons.task_alt_rounded, 'Task Completions', 'Finish prioritized tasks on your checklist for direct bundles.'),
+                    
+                    const SizedBox(height: 24),
+                    
+                    // --- SECTION 2: THE TIERS ---
+                    const Text('Ranked Tiers & Perks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+                    const SizedBox(height: 12),
+                    
+                    _buildTierDetailItem('Novice Spark', 'Levels 1–5', 'Habit Foundations', Colors.grey, Icons.child_care, userCurrentLevel <= 5),
+                    _buildTierDetailItem('Deep Focuser', 'Levels 6–15', 'Access to custom study analytics summaries', Colors.blue, Icons.trending_up, userCurrentLevel >= 6 && userCurrentLevel <= 15),
+                    _buildTierDetailItem('Flow Master', 'Levels 16–30', 'Unlocks 1x Monthly Auto-Streak Shield protector', Colors.teal, Icons.bolt, userCurrentLevel >= 16 && userCurrentLevel <= 30),
+                    _buildTierDetailItem('Productivity Titan', 'Levels 31–50', 'Custom profile themes & exclusive badge flare rings', Colors.orange, Icons.emoji_events, userCurrentLevel >= 31 && userCurrentLevel <= 50),
+                    _buildTierDetailItem('LockedIn Legend', 'Levels 51+', 'Elite Leaderboard status & Golden avatar aura frame', Colors.purple, Icons.diamond, userCurrentLevel >= 51),
+                    
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildXpRuleRow(IconData icon, String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 16, backgroundColor: const Color(0xfff1eefc), child: Icon(icon, size: 16, color: const Color(0xff5732a3))),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(subtitle, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTierDetailItem(String name, String levels, String perk, Color color, IconData icon, bool isCurrent) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrent ? color.withAlpha(20) : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isCurrent ? color : Colors.grey.shade200, width: isCurrent ? 1.5 : 1),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(backgroundColor: color, radius: 16, child: Icon(icon, color: Colors.white, size: 16)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 6),
+                    Text('($levels)', style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                    if (isCurrent) ...[
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+                        child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                      )
+                    ]
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text('Perk: $perk', style: TextStyle(color: isCurrent ? Colors.black87 : Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
@@ -483,7 +683,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                               cursor: SystemMouseCursors.click,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                // FIXED: Switched to .withAlpha for strict modern linting
                                 decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(16)),
                                 child: Row(
                                   children: [
@@ -513,6 +712,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                           ),
                         ],
                       ),
+                      
+                      // DYNAMIC PROGRESS TIER SYSTEM ADDED HERE
+                      _buildTierProgressCard(),
+                      
                       const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -840,5 +1043,36 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         ),
       ),
     );
+  }
+}
+
+class GamificationEngine {
+  static int getLevel(int totalXp) {
+    if (totalXp < 2500) return (totalXp / 500).floor() + 1;
+    if (totalXp < 12500) return ((totalXp - 2500) / 1000).floor() + 6;
+    if (totalXp < 42500) return ((totalXp - 12500) / 2000).floor() + 16;
+    if (totalXp < 122500) return ((totalXp - 42500) / 4000).floor() + 31;
+    return ((totalXp - 122500) / 8000).floor() + 51;
+  }
+
+  static int getXpNeededForNextLevel(int currentLevel) {
+    if (currentLevel < 5) return currentLevel * 500;
+    if (currentLevel < 15) return 2500 + ((currentLevel - 5) * 1000);
+    if (currentLevel < 30) return 12500 + ((currentLevel - 15) * 2000);
+    if (currentLevel < 50) return 42500 + ((currentLevel - 30) * 4000);
+    return 122500 + ((currentLevel - 50) * 8000);
+  }
+
+  static int getXpThresholdForCurrentLevel(int currentLevel) {
+    if (currentLevel <= 1) return 0;
+    return getXpNeededForNextLevel(currentLevel - 1);
+  }
+
+  static Map<String, dynamic> getTierDetails(int level) {
+    if (level <= 5) return {'name': 'Novice Spark', 'color': Colors.grey, 'icon': Icons.child_care};
+    if (level <= 15) return {'name': 'Deep Focuser', 'color': Colors.blueAccent, 'icon': Icons.trending_up};
+    if (level <= 30) return {'name': 'Flow Master', 'color': Colors.teal, 'icon': Icons.bolt};
+    if (level <= 50) return {'name': 'Productivity Titan', 'color': Colors.orange, 'icon': Icons.emoji_events};
+    return {'name': 'LockedIn Legend', 'color': Colors.amber, 'icon': Icons.diamond};
   }
 }
