@@ -338,7 +338,7 @@ class _FeedScreenState extends State<FeedScreen> {
                       final subjectFull = item['subject']?.toString() ?? 'Unknown';
                       final durationMins = item['duration_minutes']?.toString() ?? '0';
                       final location = item['location']?.toString() ?? 'Campus';
-                      final xp = item['xp_earned']?.toString() ?? '0';
+                      final xp = durationMins;
 
                       String taskName = subjectFull;
                       String moduleName = '';
