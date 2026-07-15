@@ -1,6 +1,5 @@
-// lib/screens/profile_screen.dart
 import 'dart:io';
-import 'package:flutter/foundation.dart'; // Added to support debugPrint
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -11,46 +10,61 @@ class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  State<ProfileScreen> createState() => ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
-  final _supabase = Supabase.instance.client;
-  final ImagePicker _picker = ImagePicker();
+class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
+  late final SupabaseClient _supabase; // Declared here
+  final ImagePicker picker = ImagePicker();
   late TabController _subTabController;
-
+  
   bool _isLoading = true;
   bool _isUploading = false;
   String _username = 'User';
   int _totalXp = 0;
   int _currentStreak = 0;
   String? _avatarUrl;
-
   List<dynamic> _myHistory = [];
   List<Map<String, dynamic>> _modules = [];
   Map<DateTime, List<dynamic>> _sessionsByDay = {};
+  
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-
+  
   List<String> _followersUsernames = [];
   List<String> _followingUsernames = [];
 
+  //--- Analytics Dashboard State
+  String _selectedTimeframe = 'Week'; 
+  List<dynamic> _currentPeriodSessions = [];
+  List<dynamic> _previousPeriodSessions = [];
+  bool _isLoadingAnalytics = false;
+
+  // ONLY ONE Single initState() block:
   @override
   void initState() {
+    _supabase = Supabase.instance.client; // Safe initialization
     super.initState();
+    
     _subTabController = TabController(length: 2, vsync: this);
     _selectedDay = DateTime(_focusedDay.year, _focusedDay.month, _focusedDay.day);
+    
     _fetchProfileMetrics();
     _fetchModules();
+    
     syncProfileNotifier.addListener(_fetchProfileMetrics);
     syncProfileNotifier.addListener(_fetchModules);
+    syncProfileNotifier.addListener(_fetchAnalyticsData);
   }
+
+  // ... the rest of your methods (_handleSignOut, _fetchProfileMetrics, etc.)
 
   @override
   void dispose() {
     _subTabController.dispose();
     syncProfileNotifier.removeListener(_fetchProfileMetrics);
     syncProfileNotifier.removeListener(_fetchModules);
+    syncProfileNotifier.removeListener(_fetchAnalyticsData);
     super.dispose();
   }
 
@@ -66,53 +80,72 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
+  
   Future<void> _fetchProfileMetrics() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
+  if (!mounted) return;
+  setState(() { 
+    _isLoading = true; 
+  });
 
-      final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
-      _username = profileData['username'] ?? 'User';
-      _avatarUrl = profileData['avatar_url'];
-
-      final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
-      final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
-
-      _followersUsernames = (followersData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
-      _followingUsernames = (followingData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
-
-      final response = await _supabase.from('study_sessions').select().eq('user_id', user.id).order('created_at', ascending: false);
-
-      int xpCounter = 0;
-      Map<DateTime, List<dynamic>> groupedSessions = {};
-      Set<String> uniqueDates = {};
-
-      for (var row in response) {
-        xpCounter += (row['xp_earned'] as num?)?.toInt() ?? 0;
-        if (row['created_at'] != null) {
-          DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
-          DateTime cleanDate = DateTime(date.year, date.month, date.day);
-
-          uniqueDates.add("${cleanDate.year}-${cleanDate.month}-${cleanDate.day}");
-
-          if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
-          groupedSessions[cleanDate]!.add(row);
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _myHistory = response;
-          _totalXp = xpCounter;
-          _sessionsByDay = groupedSessions;
-          _currentStreak = _calculateStreak(uniqueDates);
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
+  try {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
       if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
+    _username = profileData['username'] ?? 'User';
+    _avatarUrl = profileData['avatar_url'];
+
+    final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
+    final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
+
+    _followersUsernames = (followersData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+    _followingUsernames = (followingData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+
+    final response = await _supabase.from('study_sessions').select().eq('user_id', user.id).order('created_at', ascending: false);
+    
+    int xpCounter = 0;
+    Map<DateTime, List<dynamic>> groupedSessions = {};
+    Set<String> uniqueDates = {};
+
+    for (var row in response) {
+      // FIX: Calculate XP strictly as 1 XP per 1 minute (10 XP per 10 mins)
+      final int duration = int.tryParse(row['duration_minutes']?.toString() ?? '0') ?? 0;
+      xpCounter += duration;
+
+      if (row['created_at'] != null) {
+        DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
+        DateTime cleanDate = DateTime(date.year, date.month, date.day);
+        uniqueDates.add("${cleanDate.year}-${cleanDate.month}-${cleanDate.day}");
+        
+        if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
+        groupedSessions[cleanDate]!.add(row);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _myHistory = response;
+        _totalXp = xpCounter; // This ensures the tier progress card gets the updated XP value
+        _sessionsByDay = groupedSessions;
+        _currentStreak = calculateStreak(uniqueDates);
+        _isLoading = false;
+      });
+      _fetchAnalyticsData();
+    }
+  } catch (e) {
+    debugPrint("Profile Fetch Error: $e");
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _isLoadingAnalytics = false;
+      });
     }
   }
+}
+
 
   Future<void> _fetchModules() async {
     try {
@@ -122,22 +155,94 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         if (mounted) setState(() => _modules = List<Map<String, dynamic>>.from(data));
       }
     } catch (e) {
-      debugPrint('Error fetching modules: $e'); // FIXED: Swapped print to debugPrint
+      debugPrint('Error fetching modules: $e');
+    }
+  }
+
+  Future<void> _fetchAnalyticsData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingAnalytics = true;
+    });
+
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      final now = DateTime.now();
+      DateTime currentStart;
+      DateTime currentEnd = now;
+      DateTime previousStart;
+      DateTime previousEnd;
+
+      switch (_selectedTimeframe) {
+        case 'Day':
+          currentStart = DateTime(now.year, now.month, now.day);
+          previousStart = currentStart.subtract(const Duration(days: 1));
+          previousEnd = currentStart;
+          break;
+        case 'Week':
+          final todayMidnight = DateTime(now.year, now.month, now.day);
+          currentStart = todayMidnight.subtract(Duration(days: todayMidnight.weekday - 1));
+          previousStart = currentStart.subtract(const Duration(days: 7));
+          previousEnd = currentStart;
+          break;
+        case 'Month':
+          currentStart = DateTime(now.year, now.month, 1);
+          previousStart = DateTime(now.year, now.month - 1, 1);
+          previousEnd = currentStart;
+          break;
+        case 'Year':
+        default:
+          currentStart = DateTime(now.year, 1, 1);
+          previousStart = DateTime(now.year - 1, 1, 1);
+          previousEnd = currentStart;
+          break;
+      }
+
+      // Fetch Current Period
+      final List<dynamic> currentData = await _supabase
+          .from('study_sessions')
+          .select()
+          .eq('user_id', user.id)
+          .gte('created_at', currentStart.toUtc().toIso8601String())
+          .lte('created_at', currentEnd.toUtc().toIso8601String());
+
+      // Fetch Previous Period
+      final List<dynamic> previousData = await _supabase
+          .from('study_sessions')
+          .select()
+          .eq('user_id', user.id)
+          .gte('created_at', previousStart.toUtc().toIso8601String())
+          .lt('created_at', previousEnd.toUtc().toIso8601String());
+
+      if (mounted) {
+        setState(() {
+          _currentPeriodSessions = currentData;
+          _previousPeriodSessions = previousData;
+          _isLoadingAnalytics = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Analytics Fetch Error: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingAnalytics = false;
+        });
+      }
     }
   }
 
   Future<void> _pickAndUploadImage() async {
-    final XFile? pickedFile = await _picker.pickImage(
+    final XFile? pickedFile = await picker.pickImage(
       source: ImageSource.gallery,
       maxWidth: 400,
       maxHeight: 400,
       imageQuality: 85,
     );
-
     if (pickedFile == null) return;
 
     setState(() => _isUploading = true);
-
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
@@ -147,10 +252,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       final String filePath = '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
 
       await _supabase.storage.from('avatars').upload(
-            filePath,
-            file,
-            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-          );
+        filePath,
+        file,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
 
       final String publicUrl = _supabase.storage.from('avatars').getPublicUrl(filePath);
 
@@ -177,7 +282,42 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  int _calculateStreak(Set<String> uniqueDates) {
+  Future<void> _deleteProfilePicture() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() => _isUploading = true);
+    try {
+      if (_avatarUrl != null) {
+        final uri = Uri.parse(_avatarUrl!);
+        final fileName = '${user.id}/${uri.pathSegments.last}';
+        try {
+          await _supabase.storage.from('avatars').remove([fileName]);
+        } catch (_) {}
+      }
+
+      await _supabase.from('profiles').update({'avatar_url': null}).eq('id', user.id);
+
+      if (mounted) {
+        setState(() {
+          _avatarUrl = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile picture removed successfully.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to clear profile picture: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  int calculateStreak(Set<String> uniqueDates) {
     int streak = 0;
     DateTime checkDate = DateTime.now();
     DateTime todayClean = DateTime(checkDate.year, checkDate.month, checkDate.day);
@@ -213,7 +353,11 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         return Color(int.parse(hex, radix: 16));
       }
     } catch (_) {}
-    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
+
+    final colors = [
+      const Color(0xff5732a3), Colors.blueAccent, Colors.teal,
+      Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)
+    ];
     int hash = moduleName.hashCode;
     return colors[hash.abs() % colors.length];
   }
@@ -241,13 +385,16 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                       shrinkWrap: true,
                       itemCount: usernames.length,
                       itemBuilder: (ctx, i) => ListTile(
-                        leading: const CircleAvatar(backgroundColor: Color(0xfff1eefc), child: Icon(Icons.person, color: Color(0xff5732a3), size: 20)),
+                        leading: const CircleAvatar(
+                          backgroundColor: Color(0xfff1eefc),
+                          child: Icon(Icons.person, color: Color(0xff5732a3), size: 20),
+                        ),
                         title: Text('@${usernames[i]}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                         trailing: OutlinedButton(
                           onPressed: () {},
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xff5732a3)), 
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
+                            side: const BorderSide(color: Color(0xff5732a3)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                           ),
                           child: const Text('View Profile', style: TextStyle(color: Color(0xff5732a3), fontSize: 12)),
                         ),
@@ -260,13 +407,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
-  Future<void> _deleteSession(dynamic sessionId) async {
+  Future<void> deleteSession(dynamic sessionId) async {
     try {
       await _supabase.from('study_sessions').delete().eq('id', sessionId);
       _fetchProfileMetrics();
       syncFeedNotifier.value++;
     } catch (e) {
-      if (!mounted) return; // FIXED: Safety check before displaying SnackBar across async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
     }
   }
@@ -306,8 +453,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100], 
-                      borderRadius: BorderRadius.circular(8), 
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.grey.shade300),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -342,16 +489,16 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     'subject': finalSubject,
                     'duration_minutes': minutes,
                     'location': locationController.text.trim(),
-                    'xp_earned': minutes * 10,
+                    'xp_earned': minutes,
                   }).eq('id', sessionId);
-                  
-                  if (!mounted) return; // FIXED: Safety check before navigation
+
+                  if (!mounted) return;
                   Navigator.pop(context);
                   _fetchProfileMetrics();
                   syncFeedNotifier.value++;
                 },
                 child: const Text('Save Changes', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
-              )
+              ),
             ],
           );
         },
@@ -359,19 +506,15 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
   }
 
-
   Widget _buildTierProgressCard() {
     int currentLevel = GamificationEngine.getLevel(_totalXp);
     int currentLevelMinXp = GamificationEngine.getXpThresholdForCurrentLevel(currentLevel);
     int nextLevelMaxXp = GamificationEngine.getXpNeededForNextLevel(currentLevel);
-    
     int xpInCurrentLevel = _totalXp - currentLevelMinXp;
+    
     int xpRequiredForLevelUp = nextLevelMaxXp - currentLevelMinXp;
     
-    double progressFraction = xpRequiredForLevelUp > 0 
-        ? (xpInCurrentLevel / xpRequiredForLevelUp).clamp(0.0, 1.0) 
-        : 1.0;
-        
+    double progressFraction = xpRequiredForLevelUp > 0 ? (xpInCurrentLevel / xpRequiredForLevelUp).clamp(0.0, 1.0) : 1.0;
     var tier = GamificationEngine.getTierDetails(currentLevel);
 
     return GestureDetector(
@@ -406,9 +549,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '$xpInCurrentLevel / $xpRequiredForLevelUp XP to Level ${currentLevel + 1}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 11),
-                        ),
+  '$_totalXp / $nextLevelMaxXp XP to Level ${currentLevel + 1}',
+  style: const TextStyle(color: Colors.white70, fontSize: 11),
+),
                       ],
                     ),
                   ),
@@ -439,9 +582,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       backgroundColor: Colors.transparent,
       builder: (context) {
         return Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.85
-            ),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
           decoration: const BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -449,46 +590,34 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Drag Indicator handle
               const SizedBox(height: 12),
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 16),
-              
-              const Text(
-                'LockedIn Productivity Tiers',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3)),
-              ),
+              const Text('LockedIn Productivity Tiers', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
               const SizedBox(height: 4),
               Text('Level up your focus to unlock elite status metrics.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
               const Divider(height: 24),
-
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   children: [
-                    // --- SECTION 1: HOW TO EARN XP ---
                     const Text('How to Earn XP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
                     const SizedBox(height: 8),
-                    _buildXpRuleRow(Icons.timer_outlined, 'Focus Sessions', 'Earn 10 XP for every 10 minutes of tracked activity.'),
+                    _buildXpRuleRow(Icons.timer_outlined, 'Focus Sessions', 'Earn XP directly matching minutes inside deep study layouts.'),
                     _buildXpRuleRow(Icons.local_fire_department_outlined, 'Streak Multipliers', 'Keep up your daily streak to trigger bonus XP payouts.'),
                     _buildXpRuleRow(Icons.task_alt_rounded, 'Task Completions', 'Finish prioritized tasks on your checklist for direct bundles.'),
-                    
                     const SizedBox(height: 24),
-                    
-                    // --- SECTION 2: THE TIERS ---
                     const Text('Ranked Tiers & Perks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
                     const SizedBox(height: 12),
-                    
-                    _buildTierDetailItem('Novice Spark', 'Levels 1–5', 'Habit Foundations', Colors.grey, Icons.child_care, userCurrentLevel <= 5),
-                    _buildTierDetailItem('Deep Focuser', 'Levels 6–15', 'Access to custom study analytics summaries', Colors.blue, Icons.trending_up, userCurrentLevel >= 6 && userCurrentLevel <= 15),
-                    _buildTierDetailItem('Flow Master', 'Levels 16–30', 'Unlocks 1x Monthly Auto-Streak Shield protector', Colors.teal, Icons.bolt, userCurrentLevel >= 16 && userCurrentLevel <= 30),
-                    _buildTierDetailItem('Productivity Titan', 'Levels 31–50', 'Custom profile themes & exclusive badge flare rings', Colors.orange, Icons.emoji_events, userCurrentLevel >= 31 && userCurrentLevel <= 50),
+                    _buildTierDetailItem('Novice Spark', 'Levels 1-5', 'Habit Foundations', Colors.grey, Icons.child_care, userCurrentLevel <= 5),
+                    _buildTierDetailItem('Deep Focuser', 'Levels 6-15', 'Access to custom study analytics summaries', Colors.blue, Icons.trending_up, userCurrentLevel >= 6 && userCurrentLevel <= 15),
+                    _buildTierDetailItem('Flow Master', 'Levels 16-30', 'Unlocks 1x Monthly Auto-Streak Shield protector', Colors.teal, Icons.bolt, userCurrentLevel >= 16 && userCurrentLevel <= 30),
+                    _buildTierDetailItem('Productivity Titan', 'Levels 31-50', 'Custom profile themes & exclusive badge flare rings', Colors.orange, Icons.emoji_events, userCurrentLevel >= 31 && userCurrentLevel <= 50),
                     _buildTierDetailItem('LockedIn Legend', 'Levels 51+', 'Elite Leaderboard status & Golden avatar aura frame', Colors.purple, Icons.diamond, userCurrentLevel >= 51),
-                    
-                    const SizedBox(height: 24),
                   ],
                 ),
               ),
+              const SizedBox(height: 24),
             ],
           ),
         );
@@ -511,7 +640,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 Text(subtitle, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -545,7 +674,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
                         child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                      )
+                      ),
                     ]
                   ],
                 ),
@@ -558,11 +687,342 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       ),
     );
   }
+
+  Widget _buildCalendarViewTab() {
+    final List<dynamic> selectedSessions = _sessionsByDay[_selectedDay] ?? [];
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          color: Colors.white,
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: TableCalendar(
+            firstDay: DateTime.utc(2020, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
+                _focusedDay = focusedDay;
+              });
+            },
+            eventLoader: (day) {
+              final cleanDay = DateTime(day.year, day.month, day.day);
+              return _sessionsByDay[cleanDay] ?? [];
+            },
+            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+            calendarStyle: CalendarStyle(
+              todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withAlpha(60), shape: BoxShape.circle),
+              selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
+              markerDecoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle),
+              
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Sessions on ${_selectedDay?.day}/${_selectedDay?.month}/${_selectedDay?.year}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+        ),
+        const SizedBox(height: 10),
+        selectedSessions.isEmpty
+            ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24.0),
+                  child: Text('No focus logs found for this calendar date.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                ),
+              )
+            : ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: selectedSessions.length,
+                itemBuilder: (context, idx) {
+                  final item = selectedSessions[idx];
+                  final String subjectFull = item['subject']?.toString() ?? 'Study Task';
+                  final String location = item['location']?.toString() ?? 'Campus';
+                  final int duration = int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0;
+                  
+                  String taskName = subjectFull;
+                  String tag = "";
+                  
+                  if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
+                    int openParen = subjectFull.lastIndexOf('(');
+                    taskName = subjectFull.substring(0, openParen).trim();
+                    tag = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
+                  }
+
+                  return Card(
+                    color: Colors.white,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      title: Text(taskName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('$location • $duration mins'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (tag.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(
+                                color: _getColorForModule(tag).withAlpha(30),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(tag, style: TextStyle(color: _getColorForModule(tag), fontWeight: FontWeight.bold, fontSize: 11)),
+                            ),
+                          IconButton(icon: const Icon(Icons.edit_note_rounded, color: Colors.grey), onPressed: () => _showEditDialog(item)),
+                          IconButton(icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent), onPressed: () => deleteSession(item['id'])),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ],
+    );
+  }
+
+  Widget _buildAnalyticsViewTab() {
+    if (_isLoadingAnalytics) {
+    return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
+  }
+
+  final currentTotalMins = _currentPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
+  final previousTotalMins = _previousPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
   
+  // FIX: Force analytics XP cards to follow the updated duration-based rule
+  final currentTotalXp = currentTotalMins;
+  final previousTotalXp = previousTotalMins;
+
+  double durationChangePercent = 0.0;
+  if (previousTotalMins > 0) {
+    durationChangePercent = ((currentTotalMins - previousTotalMins) / previousTotalMins) * 100;
+  }
+  
+  double xpChangePercent = 0.0;
+  if (previousTotalXp > 0) {
+    xpChangePercent = ((currentTotalXp - previousTotalXp) / previousTotalXp) * 100;
+  }
+
+    final Map<String, int> locationDurations = {};
+    for (var session in _currentPeriodSessions) {
+      final loc = session['location']?.toString() ?? 'Other';
+      final mins = int.tryParse(session['duration_minutes']?.toString() ?? '0') ?? 0;
+      locationDurations[loc] = (locationDurations[loc] ?? 0) + mins;
+    }
+    
+    final sortedLocations = locationDurations.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+    return RefreshIndicator(
+      onRefresh: _fetchAnalyticsData,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Center(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ToggleButtons(
+                isSelected: [
+                  _selectedTimeframe == 'Day',
+                  _selectedTimeframe == 'Week',
+                  _selectedTimeframe == 'Month',
+                  _selectedTimeframe == 'Year',
+                ],
+                onPressed: (index) {
+                  final list = ['Day', 'Week', 'Month', 'Year'];
+                  setState(() {
+                    _selectedTimeframe = list[index];
+                  });
+                  _fetchAnalyticsData();
+                },
+                borderRadius: BorderRadius.circular(20),
+                selectedColor: Colors.white,
+                fillColor: const Color(0xff5732a3),
+                color: Colors.grey[700],
+                constraints: const BoxConstraints(minHeight: 36, minWidth: 70),
+                children: const [
+                  Text('Day'),
+                  Text('Week'),
+                  Text('Month'),
+                  Text('Year'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricComparisonCard(
+                  title: 'Study Duration',
+                  value: '${(currentTotalMins / 60).toStringAsFixed(1)} hrs',
+                  percentChange: durationChangePercent,
+                  isIncreasePositive: true,
+                  subtitle: '${currentTotalMins}m vs ${previousTotalMins}m prior',
+                  icon: Icons.timer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricComparisonCard(
+                  title: 'XP Growth',
+                  value: '+$currentTotalXp XP',
+                  percentChange: xpChangePercent,
+                  isIncreasePositive: true,
+                  subtitle: 'vs +$previousTotalXp XP prior',
+                  icon: Icons.insights_rounded,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Card(
+            color: Colors.white,
+            elevation: 1,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Focus Spots Distribution', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+                  const SizedBox(height: 4),
+                  Text('Where you spent your study sessions during this $_selectedTimeframe.', style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)),
+                  const SizedBox(height: 16),
+                  if (sortedLocations.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24.0),
+                      child: Center(child: Text('No session location data recorded for this timeframe.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                    )
+                  else
+                    ...sortedLocations.map((entry) {
+                      final index = sortedLocations.indexOf(entry);
+                      final locationName = entry.key;
+                      final duration = entry.value;
+                      final percentage = currentTotalMins > 0 ? (duration / currentTotalMins) : 0.0;
+                      
+                      final List<Color> palette = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orangeAccent];
+                      final barColor = palette[index % palette.length];
+                      
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
+    // WRAP THIS INNER ROW WITH EXPANDED:
+    Expanded(
+      child: Row(
+        children: [
+          Icon(Icons.location_on_rounded, size: 16, color: barColor),
+          const SizedBox(width: 6),
+          // Wrap the text in Flexible so long location names safely truncate
+          Flexible(
+            child: Text(
+              locationName, 
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+        ],
+      ),
+    ),
+    const SizedBox(width: 8), // Keeps a safe structural gap
+    Text(
+      '${(percentage * 100).toStringAsFixed(0)}% (${duration}m)', 
+      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[800], fontSize: 13),
+    ),
+  ],
+),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: percentage,
+                                minHeight: 8,
+                                backgroundColor: Colors.grey[100],
+                                valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricComparisonCard({
+    required String title,
+    required String value,
+    required double percentChange,
+    required bool isIncreasePositive,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final bool isNoPriorData = _previousPeriodSessions.isEmpty;
+    final bool isPositive = percentChange >= 0;
+    final bool isGoodChange = (isPositive && isIncreasePositive) || (!isPositive && !isIncreasePositive);
+    
+    Color badgeColor = Colors.grey;
+    IconData arrowIcon = Icons.trending_flat_rounded;
+    
+    if (!isNoPriorData) {
+      badgeColor = isGoodChange ? Colors.green : Colors.redAccent;
+      arrowIcon = isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded;
+    }
+
+    return Card(
+      color: Colors.white,
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: const Color(0xff5732a3), size: 22),
+            const SizedBox(height: 10),
+            Text(title, style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (!isNoPriorData) ...[
+                  Icon(arrowIcon, color: badgeColor, size: 16),
+                  const SizedBox(width: 2),
+                  Text('${percentChange.abs().toStringAsFixed(1)}%', style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                ] else
+                  const Text('N/A', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(width: 4),
+                const Text('vs prior', style: TextStyle(color: Colors.grey, fontSize: 10)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(subtitle, style: const TextStyle(color: Colors.black38, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
-
+    
     return Scaffold(
       backgroundColor: const Color(0xfff8f9fa),
       appBar: AppBar(
@@ -612,23 +1072,14 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                             radius: 36,
                             backgroundColor: Colors.white,
                             backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
-                            child: _avatarUrl == null
-                                ? const Icon(Icons.person, size: 40, color: Color(0xff5732a3))
-                                : null,
+                            child: _avatarUrl == null ? const Icon(Icons.person, size: 40, color: Color(0xff5732a3)) : null,
                           ),
                           if (_isUploading)
                             Positioned.fill(
                               child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.black45,
-                                  shape: BoxShape.circle,
-                                ),
+                                decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                                 child: const Center(
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                  ),
+                                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
                                 ),
                               ),
                             ),
@@ -636,7 +1087,37 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                             bottom: 0,
                             right: 0,
                             child: GestureDetector(
-                              onTap: _isUploading ? null : _pickAndUploadImage,
+                              onTap: _isUploading ? null : () {
+                                showModalBottomSheet(
+                                  context: context,
+                                  backgroundColor: Colors.white,
+                                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                                  builder: (context) => SafeArea(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        ListTile(
+                                          leading: const Icon(Icons.photo_library, color: Color(0xff5732a3)),
+                                          title: const Text('Upload New Photo'),
+                                          onTap: () {
+                                            Navigator.pop(context);
+                                            _pickAndUploadImage();
+                                          },
+                                        ),
+                                        if (_avatarUrl != null)
+                                          ListTile(
+                                            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                            title: const Text('Remove Current Photo', style: TextStyle(color: Colors.redAccent)),
+                                            onTap: () {
+                                              Navigator.pop(context);
+                                              _deleteProfilePicture();
+                                            },
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
                               child: const CircleAvatar(
                                 radius: 12,
                                 backgroundColor: Colors.white,
@@ -652,7 +1133,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         children: [
                           Flexible(
                             child: Text(
-                              '@$_username', 
+                              '@$_username',
                               style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
@@ -665,7 +1146,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         children: [
                           Flexible(
                             child: Text(
-                              userEmail, 
+                              userEmail,
                               style: const TextStyle(color: Colors.white70, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
@@ -712,10 +1193,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                           ),
                         ],
                       ),
-                      
-                      // DYNAMIC PROGRESS TIER SYSTEM ADDED HERE
                       _buildTierProgressCard(),
-                      
                       const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -770,283 +1248,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ),
     );
   }
-
-  Widget _buildCalendarViewTab() {
-    DateTime lookupKey = _selectedDay ?? DateTime(_focusedDay.year, _focusedDay.month, _focusedDay.day);
-    final selectedEvents = _sessionsByDay[lookupKey] ?? [];
-
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          Card(
-            elevation: 0,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.black12)),
-            child: TableCalendar(
-              firstDay: DateTime.utc(2024, 1, 1),
-              lastDay: DateTime.utc(2030, 12, 31),
-              focusedDay: _focusedDay,
-              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-              eventLoader: (day) => _sessionsByDay[DateTime(day.year, day.month, day.day)] ?? [],
-              onDaySelected: (selectedDay, focusedDay) {
-                setState(() {
-                  _selectedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
-                  _focusedDay = focusedDay;
-                });
-              },
-              calendarStyle: CalendarStyle(
-                // FIXED: Safely using withAlpha
-                todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withAlpha(76), shape: BoxShape.circle),
-                selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
-                markerDecoration: const BoxDecoration(color: Color(0xffb73229), shape: BoxShape.circle),
-              ),
-              headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
-            ),
-          ),
-          if (selectedEvents.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Center(child: Text("No sessions on this day.", style: TextStyle(color: Colors.grey))),
-            )
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: selectedEvents.length,
-              itemBuilder: (context, index) => _buildActivityItem(selectedEvents[index]),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnalyticsViewTab() {
-    if (_myHistory.isEmpty) {
-      return const Center(child: Text("Complete study sessions to generate metric summaries!"));
-    }
-
-    int totalMinutes = 0;
-    Map<String, int> moduleTimeMap = {};
-    Map<String, int> locationMap = {};
-
-    for (var session in _myHistory) {
-      int duration = (session['duration_minutes'] as num?)?.toInt() ?? 0;
-      totalMinutes += duration;
-
-      String subjectFull = session['subject']?.toString() ?? '';
-      String moduleTag = 'General';
-      if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
-        int openParen = subjectFull.lastIndexOf('(');
-        moduleTag = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
-      }
-      moduleTimeMap[moduleTag] = (moduleTimeMap[moduleTag] ?? 0) + duration;
-
-      String location = session['location']?.toString() ?? 'Unknown';
-      if (location.isEmpty) location = 'Unspecified';
-      locationMap[location] = (locationMap[location] ?? 0) + 1;
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _buildMetricCard(
-                'Total Focus', 
-                '${(totalMinutes / 60).toStringAsFixed(1)} hrs', 
-                Icons.timer_outlined, 
-                Colors.blueAccent
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildMetricCard(
-                'Sessions Run', 
-                '${_myHistory.length} completed', 
-                Icons.emoji_events_outlined, 
-                Colors.orangeAccent
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        const Text('Focus Allocation by Subject', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
-        const SizedBox(height: 8),
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: moduleTimeMap.entries.map((entry) {
-                double fraction = totalMinutes > 0 ? entry.value / totalMinutes : 0.0;
-                Color tagColor = _getColorForModule(entry.key);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              entry.key, 
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text('${entry.value} mins (${(fraction * 100).toStringAsFixed(0)}%)', style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: fraction,
-                          backgroundColor: Colors.grey[200],
-                          color: tagColor,
-                          minHeight: 8,
-                        ),
-                      )
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text('Top Study Environments', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
-        const SizedBox(height: 8),
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-          child: ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: locationMap.length > 3 ? 3 : locationMap.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
-            itemBuilder: (context, idx) {
-              var sortedEntries = locationMap.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-              var entry = sortedEntries[idx];
-              return ListTile(
-                leading: CircleAvatar(backgroundColor: Colors.grey[100], child: const Icon(Icons.place, color: Colors.blueGrey)),
-                title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
-                trailing: Text('${entry.value} visits', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMetricCard(String title, String val, IconData ico, Color col) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-        child: Row(
-          children: [
-            CircleAvatar(backgroundColor: col.withAlpha(25), child: Icon(ico, color: col)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title, 
-                    style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    val, 
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    maxLines: 2,
-                  ),
-                ],
-              ),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActivityItem(dynamic rawSession) {
-    final session = rawSession as Map<String, dynamic>;
-    final subjectFull = session['subject']?.toString() ?? 'Unknown Task';
-    String taskName = subjectFull;
-    String moduleName = '';
-
-    if (subjectFull.contains('(') && subjectFull.endsWith(')')) {
-      int openParen = subjectFull.lastIndexOf('(');
-      taskName = subjectFull.substring(0, openParen).trim();
-      moduleName = subjectFull.substring(openParen + 1, subjectFull.length - 1).trim();
-    }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-      child: ListTile(
-        leading: const Icon(Icons.history, color: Colors.grey),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                taskName, 
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            ),
-            if (moduleName.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _getColorForModule(moduleName).withAlpha(25),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: _getColorForModule(moduleName)),
-                ),
-                child: Text(
-                  moduleName, 
-                  style: TextStyle(color: _getColorForModule(moduleName), fontWeight: FontWeight.bold, fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
-            ]
-          ],
-        ),
-        subtitle: Text(
-          '${session['duration_minutes']} mins • ${session['location']} • +${session['xp_earned']} XP', 
-          style: const TextStyle(fontSize: 12),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 1,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(icon: const Icon(Icons.edit_outlined, size: 18), onPressed: () => _showEditDialog(session)),
-            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18), onPressed: () => _deleteSession(session['id'])),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class GamificationEngine {
+
   static int getLevel(int totalXp) {
     if (totalXp < 2500) return (totalXp / 500).floor() + 1;
     if (totalXp < 12500) return ((totalXp - 2500) / 1000).floor() + 6;
