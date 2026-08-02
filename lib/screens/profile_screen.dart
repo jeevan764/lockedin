@@ -1,5 +1,5 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
+// lib/screens/profile_screen.dart
+import 'package:flutter/foundation.dart'; // FIX: Replaced dart:io with foundation for Web stability
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -14,7 +14,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
-  late final SupabaseClient _supabase; // Declared here
+  late final SupabaseClient _supabase;
   final ImagePicker picker = ImagePicker();
   late TabController _subTabController;
   
@@ -40,10 +40,9 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
   List<dynamic> _previousPeriodSessions = [];
   bool _isLoadingAnalytics = false;
 
-  // ONLY ONE Single initState() block:
   @override
   void initState() {
-    _supabase = Supabase.instance.client; // Safe initialization
+    _supabase = Supabase.instance.client;
     super.initState();
     
     _subTabController = TabController(length: 2, vsync: this);
@@ -56,8 +55,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     syncProfileNotifier.addListener(_fetchModules);
     syncProfileNotifier.addListener(_fetchAnalyticsData);
   }
-
-  // ... the rest of your methods (_handleSignOut, _fetchProfileMetrics, etc.)
 
   @override
   void dispose() {
@@ -80,7 +77,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     }
   }
 
-  
   Future<void> _fetchProfileMetrics() async {
   if (!mounted) return;
   setState(() { 
@@ -111,7 +107,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     Set<String> uniqueDates = {};
 
     for (var row in response) {
-      // FIX: Calculate XP strictly as 1 XP per 1 minute (10 XP per 10 mins)
       final int duration = int.tryParse(row['duration_minutes']?.toString() ?? '0') ?? 0;
       xpCounter += duration;
 
@@ -128,7 +123,7 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     if (mounted) {
       setState(() {
         _myHistory = response;
-        _totalXp = xpCounter; // This ensures the tier progress card gets the updated XP value
+        _totalXp = xpCounter; 
         _sessionsByDay = groupedSessions;
         _currentStreak = calculateStreak(uniqueDates);
         _isLoading = false;
@@ -145,7 +140,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     }
   }
 }
-
 
   Future<void> _fetchModules() async {
     try {
@@ -200,7 +194,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
           break;
       }
 
-      // Fetch Current Period
       final List<dynamic> currentData = await _supabase
           .from('study_sessions')
           .select()
@@ -208,7 +201,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
           .gte('created_at', currentStart.toUtc().toIso8601String())
           .lte('created_at', currentEnd.toUtc().toIso8601String());
 
-      // Fetch Previous Period
       final List<dynamic> previousData = await _supabase
           .from('study_sessions')
           .select()
@@ -247,13 +239,15 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
-      final File file = File(pickedFile.path);
-      final String fileExtension = pickedFile.path.split('.').last;
+      // FIX: Use readAsBytes for universal Web/iOS/Android memory upload support
+      final bytes = await pickedFile.readAsBytes();
+      final String fileExtension = pickedFile.name.split('.').last;
       final String filePath = '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
 
-      await _supabase.storage.from('avatars').upload(
+      // FIX: Swapped .upload for .uploadBinary to process the Uint8List
+      await _supabase.storage.from('avatars').uploadBinary(
         filePath,
-        file,
+        bytes,
         fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
       );
 
@@ -549,9 +543,9 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                         ),
                         const SizedBox(height: 2),
                         Text(
-  '$_totalXp / $nextLevelMaxXp XP to Level ${currentLevel + 1}',
-  style: const TextStyle(color: Colors.white70, fontSize: 11),
-),
+                          '$_totalXp / $nextLevelMaxXp XP to Level ${currentLevel + 1}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
                       ],
                     ),
                   ),
@@ -793,7 +787,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
   final currentTotalMins = _currentPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
   final previousTotalMins = _previousPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
   
-  // FIX: Force analytics XP cards to follow the updated duration-based rule
   final currentTotalXp = currentTotalMins;
   final previousTotalXp = previousTotalMins;
 
@@ -915,13 +908,11 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                             Row(
   mainAxisAlignment: MainAxisAlignment.spaceBetween,
   children: [
-    // WRAP THIS INNER ROW WITH EXPANDED:
     Expanded(
       child: Row(
         children: [
           Icon(Icons.location_on_rounded, size: 16, color: barColor),
           const SizedBox(width: 6),
-          // Wrap the text in Flexible so long location names safely truncate
           Flexible(
             child: Text(
               locationName, 
@@ -933,7 +924,7 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
         ],
       ),
     ),
-    const SizedBox(width: 8), // Keeps a safe structural gap
+    const SizedBox(width: 8), 
     Text(
       '${(percentage * 100).toStringAsFixed(0)}% (${duration}m)', 
       style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[800], fontSize: 13),

@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard_screen.dart';
 
 class DBTaskModule {
-  final int id;
+  final dynamic id; // FIX: Changed from int to dynamic to support Supabase UUID strings
   final String name;
   final Color color;
   final List<DBTaskItem> tasks;
@@ -12,8 +12,8 @@ class DBTaskModule {
   DBTaskModule({required this.id, required this.name, required this.color, required this.tasks});
 
   factory DBTaskModule.fromSupabase(Map<String, dynamic> json) {
-    // Robustly handle parsing standard IDs from database rows
-    final int parsedId = int.tryParse(json['id'].toString()) ?? 0;
+    // FIX: Directly assign the ID instead of trying to parse it as an integer
+    final dynamic parsedId = json['id'];
 
     // Safely extract and normalize hex color format configurations
     String hexColor = json['color_hex']?.toString() ?? '0xff5732a3';
@@ -45,7 +45,7 @@ class DBTaskModule {
 }
 
 class DBTaskItem {
-  final int id;
+  final dynamic id; // FIX: Changed from int to dynamic
   final String title;
   final bool isCompleted;
 
@@ -53,7 +53,7 @@ class DBTaskItem {
 
   factory DBTaskItem.fromSupabase(Map<String, dynamic> json) {
     return DBTaskItem(
-      id: int.tryParse(json['id'].toString()) ?? 0, // Protected against explicit type mismatches
+      id: json['id'], // FIX: Directly assign without integer parsing
       title: json['title'] ?? '',
       isCompleted: json['is_completed'] ?? false,
     );
