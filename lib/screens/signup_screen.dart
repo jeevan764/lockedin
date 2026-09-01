@@ -90,11 +90,15 @@ class _SignupScreenState extends State<SignupScreen> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment.center,
-            radius: 1.2,
-            colors: [Color(0xff8b6bf0), Color(0xff5732a3)],
+        // UPDATED BACKGROUND HERE
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.45),
+              BlendMode.darken,
+            ),
           ),
         ),
         child: SafeArea(
