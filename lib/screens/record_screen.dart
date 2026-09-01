@@ -458,16 +458,15 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       }
     } catch (_) {}
     int hash = moduleName.hashCode;
-    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.tealAccent, Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent, Colors.indigoAccent, const Color(0xff2d4059)];
+    final colors = [Colors.blueAccent, Colors.tealAccent, Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent, Colors.indigoAccent, const Color(0xff2d4059)];
     return colors[hash.abs() % colors.length];
   }
 
   void _showCreateTagDialog() {
     final TextEditingController tagController = TextEditingController();
-    Color chosenColor = const Color(0xff5732a3);
+    Color chosenColor = Colors.blueAccent;
     
     final List<Color> palette = [
-      const Color(0xff5732a3),
       Colors.blueAccent,
       Colors.tealAccent,
       Colors.orangeAccent,
@@ -475,6 +474,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       Colors.redAccent,
       Colors.indigoAccent,
       const Color(0xff2d4059),
+      Colors.greenAccent,
     ];
 
     showDialog(
@@ -482,14 +482,14 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
           return AlertDialog(
-            backgroundColor: const Color(0xff1e1e24), // FIX: Dark dialog background
+            backgroundColor: const Color(0xff1e1e24), 
             title: const Text('Create New Tag', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: tagController,
-                  style: const TextStyle(color: Colors.white), // FIX: White text input
+                  style: const TextStyle(color: Colors.white), 
                   decoration: InputDecoration(
                     hintText: 'e.g. CS2103T', 
                     hintStyle: const TextStyle(color: Colors.white54),
@@ -545,22 +545,22 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent, // FIX: Transparent Scaffold
-      extendBodyBehindAppBar: true,      // FIX: Extend body into AppBar
+      backgroundColor: Colors.transparent, 
+      extendBodyBehindAppBar: true,      
       appBar: AppBar(
         title: const Text('Record Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: Colors.transparent, // FIX: Transparent AppBar
+        backgroundColor: Colors.transparent, 
         elevation: 0,
       ),
-      body: Container( // FIX: Universal Background Wrapper
+      body: Container( 
         width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(
           image: DecorationImage(
-            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            image: const AssetImage('assets/background.jpeg'), // NEW ASSET USED HERE
             fit: BoxFit.cover,
             colorFilter: ColorFilter.mode(
-              Colors.black.withOpacity(0.65), 
+              Colors.black.withOpacity(0.2), // Light overlay for the dark background
               BlendMode.darken,
             ),
           ),
@@ -573,7 +573,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1), // FIX: Frosted Glass background
+                    color: Colors.white.withOpacity(0.1), 
                     borderRadius: BorderRadius.circular(12), 
                     border: Border.all(color: Colors.white24)
                   ),
@@ -586,7 +586,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(color: _isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
+                            decoration: BoxDecoration(color: _isTimerMode ? Colors.blueAccent : Colors.transparent, borderRadius: BorderRadius.circular(11)),
                             child: Text('Live Timer', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _isTimerMode ? Colors.white : Colors.white54)),
                           ),
                         ),
@@ -598,7 +598,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(color: !_isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
+                            decoration: BoxDecoration(color: !_isTimerMode ? Colors.blueAccent : Colors.transparent, borderRadius: BorderRadius.circular(11)),
                             child: Text('Manual Entry', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: !_isTimerMode ? Colors.white : Colors.white54)),
                           ),
                         ),
@@ -609,12 +609,12 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                 const SizedBox(height: 30),
                 TextField(
                   controller: _taskNameController,
-                  style: const TextStyle(color: Colors.white), // FIX: White text input
+                  style: const TextStyle(color: Colors.white), 
                   decoration: InputDecoration(
                     hintText: 'What are you working on? (e.g. Tutorial 3)',
                     hintStyle: const TextStyle(color: Colors.white54),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.1), // FIX: Translucent filled background
+                    fillColor: Colors.white.withOpacity(0.1), 
                     prefixIcon: const Icon(Icons.edit_note, color: Colors.white54),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
@@ -635,7 +635,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   isExpanded: true,
-                                  dropdownColor: const Color(0xff2d2d34), // FIX: Dark Dropdown background
+                                  dropdownColor: const Color(0xff2d2d34), 
                                   hint: const Text('Select Subject Tag (Optional)', style: TextStyle(color: Colors.white54)),
                                   value: _selectedModuleId,
                                   items: _modules.map((m) {
@@ -653,7 +653,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                                               color: _getColorForModule(m['name'].toString()),
                                             ),
                                           ),
-                                          Text(m['name'].toString(), style: const TextStyle(color: Colors.white)), // FIX: White text
+                                          Text(m['name'].toString(), style: const TextStyle(color: Colors.white)), 
                                         ],
                                       ),
                                     );
@@ -678,7 +678,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                             ),
                           const SizedBox(width: 8),
                           IconButton(
-                            icon: const Icon(Icons.create_new_folder, color: Colors.blueAccent, size: 28), // Changed to blueAccent for visibility
+                            icon: const Icon(Icons.create_new_folder, color: Colors.blueAccent, size: 28), 
                             onPressed: _showCreateTagDialog,
                           ),
                         ],
@@ -733,7 +733,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                   child: ElevatedButton(
                     onPressed: _isSubmitting || (_isTimerMode && _isRunning && !_isPaused) ? null : _submitSession,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xff5732a3),
+                      backgroundColor: Colors.blueAccent, // FIX: Changed to Blue Accent
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -761,7 +761,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     final minutes = twoDigits(minutesInt);
     final seconds = twoDigits(secondsInt);
 
-    Color borderAccentColor = const Color(0xff5732a3);
+    Color borderAccentColor = Colors.blueAccent; // FIX: Changed to Blue Accent
     if (_isRunning) {
       borderAccentColor = _isPaused ? Colors.orangeAccent : Colors.redAccent;
     }
@@ -781,7 +781,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
             border: Border.all(color: borderAccentColor, width: 8),
           ),
           child: Center(
-            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 35, fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.white)), // FIX: White timer text
+            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 35, fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.white)), 
           ),
         ),
         const SizedBox(height: 24),
@@ -804,7 +804,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                 style: const TextStyle(fontSize: 16)
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _isRunning ? (_isPaused ? Colors.green : Colors.orangeAccent) : const Color(0xff5732a3),
+                backgroundColor: _isRunning ? (_isPaused ? Colors.green : Colors.orangeAccent) : Colors.blueAccent, // FIX: Changed to Blue Accent
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),

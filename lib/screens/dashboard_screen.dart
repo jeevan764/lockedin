@@ -43,10 +43,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: _pages,
       ),
       bottomNavigationBar: BottomNavigationBar(
+        backgroundColor: const Color(0xff1e1e24), // ADD THIS: Dark slate background
+        selectedItemColor: Colors.blueAccent,     // CHANGED: From purple to Blue Accent
+        unselectedItemColor: Colors.white54,      // CHANGED: From black38 to light grey
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xff5732a3),
-        unselectedItemColor: Colors.black38,
         onTap: (index) {
           // Safety Check: If there's an active dialog overlaying the viewport when the user 
           // taps a bottom tab navigation switch button, safely clear the dialogue history stack 

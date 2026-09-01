@@ -302,10 +302,10 @@ class _TasksScreenState extends State<TasksScreen> {
         height: double.infinity,
         decoration: BoxDecoration(
           image: DecorationImage(
-            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            image: const AssetImage('assets/background.jpeg'),
             fit: BoxFit.cover,
             colorFilter: ColorFilter.mode(
-              Colors.black.withOpacity(0.65), 
+              Colors.black.withOpacity(0.2), 
               BlendMode.darken,
             ),
           ),
