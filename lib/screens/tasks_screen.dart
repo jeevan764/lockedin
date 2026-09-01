@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard_screen.dart';
 
 class DBTaskModule {
-  final dynamic id; // FIX: Changed from int to dynamic to support Supabase UUID strings
+  final dynamic id; 
   final String name;
   final Color color;
   final List<DBTaskItem> tasks;
@@ -12,26 +12,23 @@ class DBTaskModule {
   DBTaskModule({required this.id, required this.name, required this.color, required this.tasks});
 
   factory DBTaskModule.fromSupabase(Map<String, dynamic> json) {
-    // FIX: Directly assign the ID instead of trying to parse it as an integer
     final dynamic parsedId = json['id'];
 
-    // Safely extract and normalize hex color format configurations
     String hexColor = json['color_hex']?.toString() ?? '0xff5732a3';
     hexColor = hexColor.replaceAll('#', '').trim();
     
-    // Add missing alpha components if the string arrives as a short hex code
     if (hexColor.startsWith('0x')) {
       hexColor = hexColor.substring(2);
     }
     if (hexColor.length == 6) {
-      hexColor = 'FF$hexColor'; // Prepend full opacity channel
+      hexColor = 'FF$hexColor'; 
     }
 
     int colorValue;
     try {
       colorValue = int.parse(hexColor, radix: 16);
     } catch (_) {
-      colorValue = 0xff5732a3; // Reliable safety fallback value
+      colorValue = 0xff5732a3; 
     }
 
     List<dynamic> taskList = json['tasks'] ?? [];
@@ -45,7 +42,7 @@ class DBTaskModule {
 }
 
 class DBTaskItem {
-  final dynamic id; // FIX: Changed from int to dynamic
+  final dynamic id; 
   final String title;
   final bool isCompleted;
 
@@ -53,7 +50,7 @@ class DBTaskItem {
 
   factory DBTaskItem.fromSupabase(Map<String, dynamic> json) {
     return DBTaskItem(
-      id: json['id'], // FIX: Directly assign without integer parsing
+      id: json['id'], 
       title: json['title'] ?? '',
       isCompleted: json['is_completed'] ?? false,
     );
@@ -76,7 +73,7 @@ class _TasksScreenState extends State<TasksScreen> {
   void initState() {
     super.initState();
     _loadUserWorkspace();
-    syncTasksNotifier.addListener(_loadUserWorkspace); // Listens for instant updates from RecordScreen
+    syncTasksNotifier.addListener(_loadUserWorkspace); 
   }
 
   @override
@@ -90,8 +87,6 @@ class _TasksScreenState extends State<TasksScreen> {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
       
-      // Removed the crashing .eq('tasks.is_completed', false) from PostgREST query.
-      // We pull modules and their tasks normally, keeping empty modules safe from vanishing.
       final List<dynamic> response = await _supabase
           .from('task_modules')
           .select('*, tasks(*)')
@@ -102,9 +97,6 @@ class _TasksScreenState extends State<TasksScreen> {
         setState(() {
           _modules = response.map((data) {
             final baseModule = DBTaskModule.fromSupabase(data);
-            
-            // Filter out completed tasks locally in memory instead of crashing the database channel.
-            // This allows empty categories to remain completely visible.
             final activeTasks = baseModule.tasks.where((t) => !t.isCompleted).toList();
             
             return DBTaskModule(
@@ -133,7 +125,6 @@ class _TasksScreenState extends State<TasksScreen> {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
       
-      // Use standard hex string serialization format
       final String hexString = '0x${color.value.toRadixString(16)}';
       await _supabase.from('task_modules').insert({
         'user_id': user.id,
@@ -163,7 +154,7 @@ class _TasksScreenState extends State<TasksScreen> {
     try {
       await _supabase.from('tasks').update({'is_completed': true}).eq('id', task.id);
       _loadUserWorkspace();
-      syncProfileNotifier.value++; // Adds completion events to Profile metric counters
+      syncProfileNotifier.value++; 
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error closing task: $e')));
     }
@@ -181,17 +172,29 @@ class _TasksScreenState extends State<TasksScreen> {
   void _showAddModuleDialog() {
     final TextEditingController controller = TextEditingController();
     Color chosenColor = const Color(0xff5732a3);
-    final List<Color> palette = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
+    final List<Color> palette = [const Color(0xff5732a3), Colors.blueAccent, Colors.tealAccent, Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent, Colors.indigoAccent, const Color(0xff2d4059)];
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => AlertDialog(
-          title: const Text('New Category Tag', style: TextStyle(fontWeight: FontWeight.bold)),
+          backgroundColor: const Color(0xff1e1e24), // FIX: Dark dialog background
+          title: const Text('New Category Tag', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: controller, decoration: const InputDecoration(hintText: 'Subject Code (e.g., CS1101S)'), autofocus: true),
+              TextField(
+                controller: controller, 
+                style: const TextStyle(color: Colors.white), // FIX: White text input
+                decoration: InputDecoration(
+                  hintText: 'Subject Code (e.g., CS1101S)',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                ), 
+                autofocus: true
+              ),
               const SizedBox(height: 20),
               Wrap(
                 spacing: 8,
@@ -203,7 +206,7 @@ class _TasksScreenState extends State<TasksScreen> {
                     child: Container(
                       width: 32,
                       height: 32,
-                      decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: selected ? Border.all(color: Colors.black, width: 2.5) : null),
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: selected ? Border.all(color: Colors.white, width: 2.5) : null),
                     ),
                   );
                 }).toList(),
@@ -211,7 +214,7 @@ class _TasksScreenState extends State<TasksScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
             TextButton(
               onPressed: () {
                 if (controller.text.isNotEmpty) {
@@ -219,7 +222,7 @@ class _TasksScreenState extends State<TasksScreen> {
                   Navigator.pop(context);
                 }
               },
-              child: const Text('Create', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+              child: const Text('Create', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
             )
           ],
         ),
@@ -232,10 +235,22 @@ class _TasksScreenState extends State<TasksScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Add task to ${module.name}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'Task objective...'), autofocus: true),
+        backgroundColor: const Color(0xff1e1e24), // FIX: Dark dialog background
+        title: Text('Add task to ${module.name}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+        content: TextField(
+          controller: controller, 
+          style: const TextStyle(color: Colors.white), // FIX: White text input
+          decoration: InputDecoration(
+            hintText: 'Task objective...',
+            hintStyle: const TextStyle(color: Colors.white54),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.1),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          ), 
+          autofocus: true
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
           TextButton(
             onPressed: () {
               if (controller.text.isNotEmpty) {
@@ -243,7 +258,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 Navigator.pop(context);
               }
             },
-            child: const Text('Add Task', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+            child: const Text('Add Task', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -254,16 +269,17 @@ class _TasksScreenState extends State<TasksScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Subject?', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('Permanently wipe out "${module.name}" and all tasks inside?'),
+        backgroundColor: const Color(0xff1e1e24), // FIX: Dark dialog background
+        title: const Text('Delete Subject?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        content: Text('Permanently wipe out "${module.name}" and all tasks inside?', style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
           TextButton(
             onPressed: () {
               _handleDeleteModule(module);
               Navigator.pop(context);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -273,57 +289,87 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfff8f9fa),
+      backgroundColor: Colors.transparent, // FIX: Transparent Scaffold
+      extendBodyBehindAppBar: true,      // FIX: Extend body into AppBar
       appBar: AppBar(
         title: const Text('Workspace Objectives', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: const Color(0xff5732a3),
-        actions: [IconButton(icon: const Icon(Icons.create_new_folder, color: Colors.white), onPressed: _showAddModuleDialog)],
+        backgroundColor: Colors.transparent, // FIX: Transparent AppBar
+        elevation: 0,
+        actions: [IconButton(icon: const Icon(Icons.create_new_folder, color: Colors.blueAccent), onPressed: _showAddModuleDialog)],
       ),
-      body: _isFetching
-          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          : _modules.isEmpty
-              ? const Center(child: Text('No active subjects. Tap the folder icon to add one!'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16.0),
-                  itemCount: _modules.length,
-                  itemBuilder: (context, index) {
-                    final module = _modules[index];
-                    return Card(
-                      elevation: 0,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.black12)),
-                      child: Theme(
-                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          initiallyExpanded: true,
-                          leading: CircleAvatar(radius: 6, backgroundColor: module.color),
-                          title: Text(module.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.black54, size: 20), onPressed: () => _showAddTaskDialog(module)),
-                              IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20), onPressed: () => _confirmDeleteModule(module)),
-                            ],
+      body: Container( // FIX: Universal Background Wrapper
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.65), 
+              BlendMode.darken,
+            ),
+          ),
+        ),
+        child: SafeArea(
+          child: _isFetching
+              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              : _modules.isEmpty
+                  ? const Center(child: Text('No active subjects. Tap the folder icon to add one!', style: TextStyle(color: Colors.white54)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16.0),
+                      itemCount: _modules.length,
+                      itemBuilder: (context, index) {
+                        final module = _modules[index];
+                        return Card(
+                          elevation: 0,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          color: Colors.white.withOpacity(0.1), // FIX: Frosted Glass Dark Card
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
+                          child: Theme(
+                            data: Theme.of(context).copyWith(
+                              dividerColor: Colors.transparent,
+                              unselectedWidgetColor: Colors.white54,
+                            ),
+                            child: ExpansionTile(
+                              initiallyExpanded: true,
+                              iconColor: Colors.white,
+                              collapsedIconColor: Colors.white54,
+                              leading: CircleAvatar(radius: 6, backgroundColor: module.color),
+                              title: Text(module.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.white54, size: 20), onPressed: () => _showAddTaskDialog(module)),
+                                  IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20), onPressed: () => _confirmDeleteModule(module)),
+                                ],
+                              ),
+                              children: module.tasks.isEmpty
+                                  ? [
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(vertical: 16.0),
+                                        child: Text('No tasks under this tag yet.', style: TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic)),
+                                      )
+                                    ]
+                                  : module.tasks.map((task) {
+                                      return ListTile(
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 24.0),
+                                        leading: Checkbox(
+                                          activeColor: module.color, 
+                                          checkColor: Colors.white,
+                                          side: const BorderSide(color: Colors.white54, width: 1.5), // FIX: Visible border in dark mode
+                                          value: task.isCompleted, 
+                                          onChanged: (_) => _handleCompleteTask(module, task)
+                                        ),
+                                        title: Text(task.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white)),
+                                      );
+                                    }).toList(),
+                            ),
                           ),
-                          children: module.tasks.isEmpty
-                              ? [
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 16.0),
-                                    child: Text('No tasks under this tag yet.', style: TextStyle(color: Colors.grey, fontSize: 13, fontStyle: FontStyle.italic)),
-                                  )
-                                ]
-                              : module.tasks.map((task) {
-                                  return ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 24.0),
-                                    leading: Checkbox(activeColor: module.color, value: task.isCompleted, onChanged: (_) => _handleCompleteTask(module, task)),
-                                    title: Text(task.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-                                  );
-                                }).toList(),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                        );
+                      },
+                    ),
+        ),
+      ),
     );
   }
 }

@@ -18,10 +18,6 @@ class RecordScreen extends StatefulWidget {
 class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver {
   final _supabase = Supabase.instance.client;
 
-  // Do not construct Geocoding here. The geocoding plugin has no web
-  // implementation, and constructing it while RecordScreen is created can
-  // throw `Unexpected null value` before the widget gets a chance to build.
-
   // Background-Resilient Timer Variables
   bool _isRunning = false;
   bool _isPaused = false;
@@ -118,10 +114,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         ),
       );
 
-      // The geocoding package only supplies native implementations for
-      // Android/iOS/macOS. On web, retain the detected coordinates instead of
-      // constructing Geocoding, whose missing platform instance caused the
-      // red `Unexpected null value` screen.
       if (kIsWeb) {
         if (mounted) {
           setState(() {
@@ -133,8 +125,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         return;
       }
 
-      // Construct Geocoding lazily only after the platform check. This keeps
-      // RecordScreen safe to create in a web build.
       final geocoding = Geocoding();
       final List<Placemark> placemarks =
           await geocoding.placemarkFromCoordinates(
@@ -146,7 +136,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         Placemark place = placemarks.first;
         List<String> addressParts = [];
 
-        // Safely unwrapped to prevent ANY null crash
         final thoroughfare = place.thoroughfare ?? '';
         final placeName = place.name ?? '';
         final subLocality = place.subLocality ?? '';
@@ -195,7 +184,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
 
     if (_isRunning) {
       if (_isPaused) {
-        // RESUME ACTION (Safely fallback to 'now' to prevent null crash)
         final safePauseStart = _pauseStartTime ?? now;
         final safeStart = _startTime ?? now;
         
@@ -213,7 +201,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         });
         _startUiTicker();
       } else {
-        // MANUAL PAUSE ACTION
         _uiTicker?.cancel();
         final safeStart = _startTime ?? now;
         final currentChunk = now.difference(safeStart).inSeconds;
@@ -230,7 +217,6 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         });
       }
     } else {
-      // INITIAL START ACTION
       await prefs.setString('timer_start_time', now.toIso8601String());
       await prefs.setBool('timer_is_running', true);
       await prefs.setBool('timer_is_paused', false);
@@ -472,7 +458,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       }
     } catch (_) {}
     int hash = moduleName.hashCode;
-    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)];
+    final colors = [const Color(0xff5732a3), Colors.blueAccent, Colors.tealAccent, Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent, Colors.indigoAccent, const Color(0xff2d4059)];
     return colors[hash.abs() % colors.length];
   }
 
@@ -483,11 +469,11 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     final List<Color> palette = [
       const Color(0xff5732a3),
       Colors.blueAccent,
-      Colors.teal,
-      Colors.orange,
+      Colors.tealAccent,
+      Colors.orangeAccent,
       Colors.pinkAccent,
       Colors.redAccent,
-      Colors.indigo,
+      Colors.indigoAccent,
       const Color(0xff2d4059),
     ];
 
@@ -496,17 +482,25 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
           return AlertDialog(
-            title: const Text('Create New Tag', style: TextStyle(fontWeight: FontWeight.bold)),
+            backgroundColor: const Color(0xff1e1e24), // FIX: Dark dialog background
+            title: const Text('Create New Tag', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: tagController,
-                  decoration: const InputDecoration(hintText: 'e.g. CS2103T'),
+                  style: const TextStyle(color: Colors.white), // FIX: White text input
+                  decoration: InputDecoration(
+                    hintText: 'e.g. CS2103T', 
+                    hintStyle: const TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.1),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  ),
                   autofocus: true,
                 ),
                 const SizedBox(height: 20),
-                const Align(alignment: Alignment.centerLeft, child: Text('Select Tag Color:', style: TextStyle(color: Colors.grey, fontSize: 13))),
+                const Align(alignment: Alignment.centerLeft, child: Text('Select Tag Color:', style: TextStyle(color: Colors.white54, fontSize: 13))),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
@@ -521,7 +515,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                         decoration: BoxDecoration(
                           color: color,
                           shape: BoxShape.circle,
-                          border: isSelected ? Border.all(color: Colors.black, width: 3) : null,
+                          border: isSelected ? Border.all(color: Colors.white, width: 3) : null,
                         ),
                         child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 18) : null,
                       ),
@@ -531,7 +525,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
               TextButton(
                 onPressed: () {
                   if (tagController.text.trim().isNotEmpty) {
@@ -539,7 +533,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                     Navigator.pop(context);
                   }
                 },
-                child: const Text('Create', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+                child: const Text('Create', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -551,174 +545,206 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.transparent, // FIX: Transparent Scaffold
+      extendBodyBehindAppBar: true,      // FIX: Extend body into AppBar
       appBar: AppBar(
         title: const Text('Record Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: const Color(0xff5732a3),
+        backgroundColor: Colors.transparent, // FIX: Transparent AppBar
         elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        if (!_isRunning) setState(() => _isTimerMode = true);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(color: _isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
-                        child: Text('Live Timer', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _isTimerMode ? Colors.white : Colors.black54)),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        if (!_isRunning) setState(() => _isTimerMode = false);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(color: !_isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
-                        child: Text('Manual Entry', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: !_isTimerMode ? Colors.white : Colors.black54)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+      body: Container( // FIX: Universal Background Wrapper
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.65), 
+              BlendMode.darken,
             ),
-            const SizedBox(height: 30),
-            TextField(
-              controller: _taskNameController,
-              decoration: InputDecoration(
-                hintText: 'What are you working on? (e.g. Tutorial 3)',
-                filled: true,
-                fillColor: Colors.white,
-                prefixIcon: const Icon(Icons.edit_note, color: Colors.grey),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              ),
-            ),
-            const SizedBox(height: 16),
-            _isLoadingModules
-                ? const LinearProgressIndicator()
-                : Row(
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1), // FIX: Frosted Glass background
+                    borderRadius: BorderRadius.circular(12), 
+                    border: Border.all(color: Colors.white24)
+                  ),
+                  child: Row(
                     children: [
                       Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              isExpanded: true,
-                              hint: const Text('Select Subject Tag (Optional)'),
-                              value: _selectedModuleId,
-                              items: _modules.map((m) {
-                                return DropdownMenuItem<String>(
-                                  value: m['id'].toString(),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min, // Safely bounds the row
-                                    children: [
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        margin: const EdgeInsets.only(right: 10),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: _getColorForModule(m['name'].toString()),
-                                        ),
-                                      ),
-                                      Text(m['name'].toString()),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                setState(() {
-                                  _selectedModuleId = val;
-                                  _selectedModuleName = _modules.firstWhere((m) => m['id'].toString() == val)['name'];
-                                });
-                              },
-                            ),
+                        child: GestureDetector(
+                          onTap: () {
+                            if (!_isRunning) setState(() => _isTimerMode = true);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(color: _isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
+                            child: Text('Live Timer', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: _isTimerMode ? Colors.white : Colors.white54)),
                           ),
                         ),
                       ),
-                      if (_selectedModuleId != null)
-                        IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () => setState(() {
-                            _selectedModuleId = null;
-                            _selectedModuleName = null;
-                          }),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            if (!_isRunning) setState(() => _isTimerMode = false);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(color: !_isTimerMode ? const Color(0xff5732a3) : Colors.transparent, borderRadius: BorderRadius.circular(11)),
+                            child: Text('Manual Entry', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, color: !_isTimerMode ? Colors.white : Colors.white54)),
+                          ),
                         ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.create_new_folder, color: Color(0xff5732a3), size: 28),
-                        onPressed: _showCreateTagDialog,
                       ),
                     ],
                   ),
-            const SizedBox(height: 16),
-            if (!_isTimerMode) ...[
-              TextField(
-                controller: _durationController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  hintText: 'Duration (Minutes)',
-                  filled: true,
-                  fillColor: Colors.white,
-                  prefixIcon: const Icon(Icons.timer_outlined, color: Colors.grey),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _locationController,
+                const SizedBox(height: 30),
+                TextField(
+                  controller: _taskNameController,
+                  style: const TextStyle(color: Colors.white), // FIX: White text input
+                  decoration: InputDecoration(
+                    hintText: 'What are you working on? (e.g. Tutorial 3)',
+                    hintStyle: const TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.1), // FIX: Translucent filled background
+                    prefixIcon: const Icon(Icons.edit_note, color: Colors.white54),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _isLoadingModules
+                    ? const LinearProgressIndicator(color: Colors.white)
+                    : Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.1), 
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white24)
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  dropdownColor: const Color(0xff2d2d34), // FIX: Dark Dropdown background
+                                  hint: const Text('Select Subject Tag (Optional)', style: TextStyle(color: Colors.white54)),
+                                  value: _selectedModuleId,
+                                  items: _modules.map((m) {
+                                    return DropdownMenuItem<String>(
+                                      value: m['id'].toString(),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            margin: const EdgeInsets.only(right: 10),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: _getColorForModule(m['name'].toString()),
+                                            ),
+                                          ),
+                                          Text(m['name'].toString(), style: const TextStyle(color: Colors.white)), // FIX: White text
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (val) {
+                                    setState(() {
+                                      _selectedModuleId = val;
+                                      _selectedModuleName = _modules.firstWhere((m) => m['id'].toString() == val)['name'];
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_selectedModuleId != null)
+                            IconButton(
+                              icon: const Icon(Icons.clear, color: Colors.white54),
+                              onPressed: () => setState(() {
+                                _selectedModuleId = null;
+                                _selectedModuleName = null;
+                              }),
+                            ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.create_new_folder, color: Colors.blueAccent, size: 28), // Changed to blueAccent for visibility
+                            onPressed: _showCreateTagDialog,
+                          ),
+                        ],
+                      ),
+                const SizedBox(height: 16),
+                if (!_isTimerMode) ...[
+                  TextField(
+                    controller: _durationController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: 'Location (e.g. UTown Library, Home)',
+                      hintText: 'Duration (Minutes)',
+                      hintStyle: const TextStyle(color: Colors.white54),
                       filled: true,
-                      fillColor: Colors.white,
-                      prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.grey),
+                      fillColor: Colors.white.withOpacity(0.1),
+                      prefixIcon: const Icon(Icons.timer_outlined, color: Colors.white54),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                ],
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _locationController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Location (e.g. UTown Library, Home)',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.1),
+                          prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.white54),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.my_location, color: Colors.blueAccent),
+                      tooltip: 'Auto-detect location',
+                      onPressed: _determineAndSetLocation,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.my_location, color: Color(0xff5732a3)),
-                  tooltip: 'Auto-detect location',
-                  onPressed: _determineAndSetLocation,
+                const SizedBox(height: 40),
+                _isTimerMode ? _buildTimerView() : const SizedBox.shrink(),
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: _isSubmitting || (_isTimerMode && _isRunning && !_isPaused) ? null : _submitSession,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xff5732a3),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: _isSubmitting 
+                        ? const CircularProgressIndicator(color: Colors.white) 
+                        : const Text('Save Session', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 40),
-            _isTimerMode ? _buildTimerView() : const SizedBox.shrink(),
-            const SizedBox(height: 40),
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton(
-                onPressed: _isSubmitting || (_isTimerMode && _isRunning && !_isPaused) ? null : _submitSession,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff5732a3),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: _isSubmitting 
-                    ? const CircularProgressIndicator(color: Colors.white) 
-                    : const Text('Save Session', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -737,14 +763,14 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
 
     Color borderAccentColor = const Color(0xff5732a3);
     if (_isRunning) {
-      borderAccentColor = _isPaused ? Colors.orange : const Color(0xffb73229);
+      borderAccentColor = _isPaused ? Colors.orangeAccent : Colors.redAccent;
     }
 
     return Column(
       children: [
         Text(
           _isRunning ? (_isPaused ? "⚠️ AUTO-PAUSED" : "Focusing...") : "Ready to Lock In?",
-          style: TextStyle(fontSize: 16, color: _isPaused ? Colors.orange : Colors.grey, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 16, color: _isPaused ? Colors.orangeAccent : Colors.white54, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 16),
         Container(
@@ -755,7 +781,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
             border: Border.all(color: borderAccentColor, width: 8),
           ),
           child: Center(
-            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 35, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+            child: Text('$hours:$minutes:$seconds', style: const TextStyle(fontSize: 35, fontWeight: FontWeight.bold, fontFamily: 'monospace', color: Colors.white)), // FIX: White timer text
           ),
         ),
         const SizedBox(height: 24),
@@ -764,7 +790,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
           children: [
             if (_elapsedSeconds > 0) 
               IconButton(
-                icon: const Icon(Icons.replay, size: 32, color: Colors.grey), 
+                icon: const Icon(Icons.replay, size: 32, color: Colors.white54), 
                 onPressed: _resetTimer
               ),
             const SizedBox(width: 20),
@@ -778,7 +804,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                 style: const TextStyle(fontSize: 16)
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _isRunning ? (_isPaused ? Colors.green : Colors.orange) : const Color(0xff5732a3),
+                backgroundColor: _isRunning ? (_isPaused ? Colors.green : Colors.orangeAccent) : const Color(0xff5732a3),
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),

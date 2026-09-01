@@ -1,5 +1,5 @@
 // lib/screens/profile_screen.dart
-import 'package:flutter/foundation.dart'; // FIX: Replaced dart:io with foundation for Web stability
+import 'package:flutter/foundation.dart'; 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,7 +34,6 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
   List<String> _followersUsernames = [];
   List<String> _followingUsernames = [];
 
-  //--- Analytics Dashboard State
   String _selectedTimeframe = 'Week'; 
   List<dynamic> _currentPeriodSessions = [];
   List<dynamic> _previousPeriodSessions = [];
@@ -78,68 +77,68 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
   }
 
   Future<void> _fetchProfileMetrics() async {
-  if (!mounted) return;
-  setState(() { 
-    _isLoading = true; 
-  });
+    if (!mounted) return;
+    setState(() { 
+      _isLoading = true; 
+    });
 
-  try {
-    final user = _supabase.auth.currentUser;
-    if (user == null) {
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
 
-    final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
-    _username = profileData['username'] ?? 'User';
-    _avatarUrl = profileData['avatar_url'];
+      final profileData = await _supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single();
+      _username = profileData['username'] ?? 'User';
+      _avatarUrl = profileData['avatar_url'];
 
-    final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
-    final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
+      final followersData = await _supabase.from('follows').select('profiles!follower_id(username)').eq('following_id', user.id);
+      final followingData = await _supabase.from('follows').select('profiles!following_id(username)').eq('follower_id', user.id);
 
-    _followersUsernames = (followersData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
-    _followingUsernames = (followingData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+      _followersUsernames = (followersData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
+      _followingUsernames = (followingData as List).map((f) => (f['profiles']?['username'] ?? 'Anonymous').toString()).toList();
 
-    final response = await _supabase.from('study_sessions').select().eq('user_id', user.id).order('created_at', ascending: false);
-    
-    int xpCounter = 0;
-    Map<DateTime, List<dynamic>> groupedSessions = {};
-    Set<String> uniqueDates = {};
+      final response = await _supabase.from('study_sessions').select().eq('user_id', user.id).order('created_at', ascending: false);
+      
+      int xpCounter = 0;
+      Map<DateTime, List<dynamic>> groupedSessions = {};
+      Set<String> uniqueDates = {};
 
-    for (var row in response) {
-      final int duration = int.tryParse(row['duration_minutes']?.toString() ?? '0') ?? 0;
-      xpCounter += duration;
+      for (var row in response) {
+        final int duration = int.tryParse(row['duration_minutes']?.toString() ?? '0') ?? 0;
+        xpCounter += duration;
 
-      if (row['created_at'] != null) {
-        DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
-        DateTime cleanDate = DateTime(date.year, date.month, date.day);
-        uniqueDates.add("${cleanDate.year}-${cleanDate.month}-${cleanDate.day}");
-        
-        if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
-        groupedSessions[cleanDate]!.add(row);
+        if (row['created_at'] != null) {
+          DateTime date = DateTime.parse(row['created_at'].toString()).toLocal();
+          DateTime cleanDate = DateTime(date.year, date.month, date.day);
+          uniqueDates.add("${cleanDate.year}-${cleanDate.month}-${cleanDate.day}");
+          
+          if (groupedSessions[cleanDate] == null) groupedSessions[cleanDate] = [];
+          groupedSessions[cleanDate]!.add(row);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _myHistory = response;
+          _totalXp = xpCounter; 
+          _sessionsByDay = groupedSessions;
+          _currentStreak = calculateStreak(uniqueDates);
+          _isLoading = false;
+        });
+        _fetchAnalyticsData();
+      }
+    } catch (e) {
+      debugPrint("Profile Fetch Error: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingAnalytics = false;
+        });
       }
     }
-
-    if (mounted) {
-      setState(() {
-        _myHistory = response;
-        _totalXp = xpCounter; 
-        _sessionsByDay = groupedSessions;
-        _currentStreak = calculateStreak(uniqueDates);
-        _isLoading = false;
-      });
-      _fetchAnalyticsData();
-    }
-  } catch (e) {
-    debugPrint("Profile Fetch Error: $e");
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _isLoadingAnalytics = false;
-      });
-    }
   }
-}
 
   Future<void> _fetchModules() async {
     try {
@@ -239,12 +238,10 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
-      // FIX: Use readAsBytes for universal Web/iOS/Android memory upload support
       final bytes = await pickedFile.readAsBytes();
       final String fileExtension = pickedFile.name.split('.').last;
       final String filePath = '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$fileExtension';
 
-      // FIX: Swapped .upload for .uploadBinary to process the Uint8List
       await _supabase.storage.from('avatars').uploadBinary(
         filePath,
         bytes,
@@ -349,8 +346,8 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     } catch (_) {}
 
     final colors = [
-      const Color(0xff5732a3), Colors.blueAccent, Colors.teal,
-      Colors.orange, Colors.pinkAccent, Colors.redAccent, Colors.indigo, const Color(0xff2d4059)
+      const Color(0xff5732a3), Colors.blueAccent, Colors.tealAccent,
+      Colors.orangeAccent, Colors.pinkAccent, Colors.redAccent, Colors.indigoAccent, const Color(0xff2d4059)
     ];
     int hash = moduleName.hashCode;
     return colors[hash.abs() % colors.length];
@@ -360,37 +357,37 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xff1e1e24),
       builder: (context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
-            const Divider(height: 24),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            const Divider(height: 24, color: Colors.white24),
             usernames.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: Text("No users found here yet.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                    child: Center(child: Text("No users found here yet.", style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic))),
                   )
                 : Flexible(
                     child: ListView.builder(
                       shrinkWrap: true,
                       itemCount: usernames.length,
                       itemBuilder: (ctx, i) => ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0xfff1eefc),
-                          child: Icon(Icons.person, color: Color(0xff5732a3), size: 20),
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.white.withOpacity(0.1),
+                          child: const Icon(Icons.person, color: Colors.white70, size: 20),
                         ),
-                        title: Text('@${usernames[i]}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                        title: Text('@${usernames[i]}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.white)),
                         trailing: OutlinedButton(
                           onPressed: () {},
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xff5732a3)),
+                            side: const BorderSide(color: Colors.white54),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                           ),
-                          child: const Text('View Profile', style: TextStyle(color: Color(0xff5732a3), fontSize: 12)),
+                          child: const Text('View Profile', style: TextStyle(color: Colors.white, fontSize: 12)),
                         ),
                       ),
                     ),
@@ -437,39 +434,41 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
           return AlertDialog(
-            title: const Text('Edit Session', style: TextStyle(fontWeight: FontWeight.bold)),
+            backgroundColor: const Color(0xff1e1e24),
+            title: const Text('Edit Session', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(controller: taskNameController, decoration: const InputDecoration(labelText: 'Task Name')),
+                  TextField(controller: taskNameController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'Task Name', labelStyle: TextStyle(color: Colors.white54))),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: Colors.white.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: Colors.white24),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         isExpanded: true,
-                        hint: const Text('Add/Change Tag...'),
+                        dropdownColor: const Color(0xff2d2d34),
+                        hint: const Text('Add/Change Tag...', style: TextStyle(color: Colors.white54)),
                         value: selectedModuleId,
-                        items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name'].toString()))).toList(),
+                        items: _modules.map((m) => DropdownMenuItem(value: m['id'].toString(), child: Text(m['name'].toString(), style: const TextStyle(color: Colors.white)))).toList(),
                         onChanged: (val) => setModalState(() => selectedModuleId = val),
                       ),
                     ),
                   ),
                   const SizedBox(height: 10),
-                  TextField(controller: durationController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Duration (Minutes)')),
+                  TextField(controller: durationController, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'Duration (Minutes)', labelStyle: TextStyle(color: Colors.white54))),
                   const SizedBox(height: 10),
-                  TextField(controller: locationController, decoration: const InputDecoration(labelText: 'Location')),
+                  TextField(controller: locationController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'Location', labelStyle: TextStyle(color: Colors.white54))),
                 ],
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
               TextButton(
                 onPressed: () async {
                   String finalSubject = taskNameController.text.trim();
@@ -491,7 +490,7 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                   _fetchProfileMetrics();
                   syncFeedNotifier.value++;
                 },
-                child: const Text('Save Changes', style: TextStyle(color: Color(0xff5732a3), fontWeight: FontWeight.bold)),
+                child: const Text('Save Changes', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -519,9 +518,9 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
           margin: const EdgeInsets.symmetric(vertical: 12),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha(30),
+            color: Colors.white.withOpacity(0.1),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white12),
+            border: Border.all(color: Colors.white24),
           ),
           child: Column(
             children: [
@@ -578,36 +577,36 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
         return Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: Color(0xff1e1e24),
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 12),
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 16),
-              const Text('LockedIn Productivity Tiers', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xff5732a3))),
+              const Text('LockedIn Productivity Tiers', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 4),
-              Text('Level up your focus to unlock elite status metrics.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-              const Divider(height: 24),
+              const Text('Level up your focus to unlock elite status metrics.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              const Divider(height: 24, color: Colors.white24),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   children: [
-                    const Text('How to Earn XP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+                    const Text('How to Earn XP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
                     const SizedBox(height: 8),
                     _buildXpRuleRow(Icons.timer_outlined, 'Focus Sessions', 'Earn XP directly matching minutes inside deep study layouts.'),
                     _buildXpRuleRow(Icons.local_fire_department_outlined, 'Streak Multipliers', 'Keep up your daily streak to trigger bonus XP payouts.'),
                     _buildXpRuleRow(Icons.task_alt_rounded, 'Task Completions', 'Finish prioritized tasks on your checklist for direct bundles.'),
                     const SizedBox(height: 24),
-                    const Text('Ranked Tiers & Perks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)),
+                    const Text('Ranked Tiers & Perks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
                     const SizedBox(height: 12),
                     _buildTierDetailItem('Novice Spark', 'Levels 1-5', 'Habit Foundations', Colors.grey, Icons.child_care, userCurrentLevel <= 5),
-                    _buildTierDetailItem('Deep Focuser', 'Levels 6-15', 'Access to custom study analytics summaries', Colors.blue, Icons.trending_up, userCurrentLevel >= 6 && userCurrentLevel <= 15),
-                    _buildTierDetailItem('Flow Master', 'Levels 16-30', 'Unlocks 1x Monthly Auto-Streak Shield protector', Colors.teal, Icons.bolt, userCurrentLevel >= 16 && userCurrentLevel <= 30),
-                    _buildTierDetailItem('Productivity Titan', 'Levels 31-50', 'Custom profile themes & exclusive badge flare rings', Colors.orange, Icons.emoji_events, userCurrentLevel >= 31 && userCurrentLevel <= 50),
-                    _buildTierDetailItem('LockedIn Legend', 'Levels 51+', 'Elite Leaderboard status & Golden avatar aura frame', Colors.purple, Icons.diamond, userCurrentLevel >= 51),
+                    _buildTierDetailItem('Deep Focuser', 'Levels 6-15', 'Access to custom study analytics summaries', Colors.blueAccent, Icons.trending_up, userCurrentLevel >= 6 && userCurrentLevel <= 15),
+                    _buildTierDetailItem('Flow Master', 'Levels 16-30', 'Unlocks 1x Monthly Auto-Streak Shield protector', Colors.tealAccent, Icons.bolt, userCurrentLevel >= 16 && userCurrentLevel <= 30),
+                    _buildTierDetailItem('Productivity Titan', 'Levels 31-50', 'Custom profile themes & exclusive badge flare rings', Colors.orangeAccent, Icons.emoji_events, userCurrentLevel >= 31 && userCurrentLevel <= 50),
+                    _buildTierDetailItem('LockedIn Legend', 'Levels 51+', 'Elite Leaderboard status & Golden avatar aura frame', Colors.amberAccent, Icons.diamond, userCurrentLevel >= 51),
                   ],
                 ),
               ),
@@ -624,14 +623,14 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         children: [
-          CircleAvatar(radius: 16, backgroundColor: const Color(0xfff1eefc), child: Icon(icon, size: 16, color: const Color(0xff5732a3))),
+          CircleAvatar(radius: 16, backgroundColor: Colors.white.withOpacity(0.1), child: Icon(icon, size: 16, color: Colors.white70)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(subtitle, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+                Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 11)),
               ],
             ),
           ),
@@ -645,9 +644,9 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isCurrent ? color.withAlpha(20) : Colors.grey.shade50,
+        color: isCurrent ? color.withOpacity(0.15) : Colors.white.withOpacity(0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isCurrent ? color : Colors.grey.shade200, width: isCurrent ? 1.5 : 1),
+        border: Border.all(color: isCurrent ? color : Colors.white12, width: isCurrent ? 1.5 : 1),
       ),
       child: Row(
         children: [
@@ -659,21 +658,21 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
               children: [
                 Row(
                   children: [
-                    Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
                     const SizedBox(width: 6),
-                    Text('($levels)', style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                    Text('($levels)', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                     if (isCurrent) ...[
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
-                        child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                        child: const Text('CURRENT', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold)),
                       ),
                     ]
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text('Perk: $perk', style: TextStyle(color: isCurrent ? Colors.black87 : Colors.grey.shade600, fontSize: 11, fontStyle: FontStyle.italic)),
+                Text('Perk: $perk', style: TextStyle(color: isCurrent ? Colors.white : Colors.white54, fontSize: 11, fontStyle: FontStyle.italic)),
               ],
             ),
           )
@@ -688,9 +687,9 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
       padding: const EdgeInsets.all(16),
       children: [
         Card(
-          color: Colors.white,
-          elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: Colors.white.withOpacity(0.1),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
           child: TableCalendar(
             firstDay: DateTime.utc(2020, 1, 1),
             lastDay: DateTime.utc(2030, 12, 31),
@@ -706,26 +705,30 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
               final cleanDay = DateTime(day.year, day.month, day.day);
               return _sessionsByDay[cleanDay] ?? [];
             },
-            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true, titleTextStyle: TextStyle(color: Colors.white, fontSize: 16)),
+            daysOfWeekStyle: const DaysOfWeekStyle(weekdayStyle: TextStyle(color: Colors.white70), weekendStyle: TextStyle(color: Colors.white70)),
             calendarStyle: CalendarStyle(
-              todayDecoration: BoxDecoration(color: const Color(0xff5732a3).withAlpha(60), shape: BoxShape.circle),
-              selectedDecoration: const BoxDecoration(color: Color(0xff5732a3), shape: BoxShape.circle),
+              defaultTextStyle: const TextStyle(color: Colors.white),
+              weekendTextStyle: const TextStyle(color: Colors.white70),
+              outsideTextStyle: const TextStyle(color: Colors.white30),
+              todayDecoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+              selectedDecoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+              selectedTextStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
               markerDecoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle),
-              
             ),
           ),
         ),
         const SizedBox(height: 16),
         Text(
           'Sessions on ${_selectedDay?.day}/${_selectedDay?.month}/${_selectedDay?.year}',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
         ),
         const SizedBox(height: 10),
         selectedSessions.isEmpty
             ? const Center(
                 child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 24.0),
-                  child: Text('No focus logs found for this calendar date.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                  child: Text('No focus logs found for this calendar date.', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
                 ),
               )
             : ListView.builder(
@@ -748,12 +751,13 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                   }
 
                   return Card(
-                    color: Colors.white,
+                    color: Colors.white.withOpacity(0.1),
+                    elevation: 0,
                     margin: const EdgeInsets.only(bottom: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
                     child: ListTile(
-                      title: Text(taskName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('$location • $duration mins'),
+                      title: Text(taskName, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                      subtitle: Text('$location • $duration mins', style: const TextStyle(color: Colors.white70)),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -762,12 +766,12 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               margin: const EdgeInsets.only(right: 8),
                               decoration: BoxDecoration(
-                                color: _getColorForModule(tag).withAlpha(30),
+                                color: _getColorForModule(tag).withOpacity(0.3),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(tag, style: TextStyle(color: _getColorForModule(tag), fontWeight: FontWeight.bold, fontSize: 11)),
                             ),
-                          IconButton(icon: const Icon(Icons.edit_note_rounded, color: Colors.grey), onPressed: () => _showEditDialog(item)),
+                          IconButton(icon: const Icon(Icons.edit_note_rounded, color: Colors.white54), onPressed: () => _showEditDialog(item)),
                           IconButton(icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent), onPressed: () => deleteSession(item['id'])),
                         ],
                       ),
@@ -781,24 +785,24 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
 
   Widget _buildAnalyticsViewTab() {
     if (_isLoadingAnalytics) {
-    return const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)));
-  }
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
 
-  final currentTotalMins = _currentPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
-  final previousTotalMins = _previousPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
-  
-  final currentTotalXp = currentTotalMins;
-  final previousTotalXp = previousTotalMins;
+    final currentTotalMins = _currentPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
+    final previousTotalMins = _previousPeriodSessions.fold<int>(0, (sum, item) => sum + (int.tryParse(item['duration_minutes']?.toString() ?? '0') ?? 0));
+    
+    final currentTotalXp = currentTotalMins;
+    final previousTotalXp = previousTotalMins;
 
-  double durationChangePercent = 0.0;
-  if (previousTotalMins > 0) {
-    durationChangePercent = ((currentTotalMins - previousTotalMins) / previousTotalMins) * 100;
-  }
-  
-  double xpChangePercent = 0.0;
-  if (previousTotalXp > 0) {
-    xpChangePercent = ((currentTotalXp - previousTotalXp) / previousTotalXp) * 100;
-  }
+    double durationChangePercent = 0.0;
+    if (previousTotalMins > 0) {
+      durationChangePercent = ((currentTotalMins - previousTotalMins) / previousTotalMins) * 100;
+    }
+    
+    double xpChangePercent = 0.0;
+    if (previousTotalXp > 0) {
+      xpChangePercent = ((currentTotalXp - previousTotalXp) / previousTotalXp) * 100;
+    }
 
     final Map<String, int> locationDurations = {};
     for (var session in _currentPeriodSessions) {
@@ -810,6 +814,8 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     final sortedLocations = locationDurations.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return RefreshIndicator(
+      color: Colors.black,
+      backgroundColor: Colors.white,
       onRefresh: _fetchAnalyticsData,
       child: ListView(
         padding: const EdgeInsets.all(16),
@@ -832,9 +838,11 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                   _fetchAnalyticsData();
                 },
                 borderRadius: BorderRadius.circular(20),
-                selectedColor: Colors.white,
-                fillColor: const Color(0xff5732a3),
-                color: Colors.grey[700],
+                selectedColor: Colors.black,
+                fillColor: Colors.white,
+                color: Colors.white54,
+                borderColor: Colors.white24,
+                selectedBorderColor: Colors.white,
                 constraints: const BoxConstraints(minHeight: 36, minWidth: 70),
                 children: const [
                   Text('Day'),
@@ -873,22 +881,22 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
           ),
           const SizedBox(height: 20),
           Card(
-            color: Colors.white,
-            elevation: 1,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            color: Colors.white.withOpacity(0.1),
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Focus Spots Distribution', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+                  const Text('Focus Spots Distribution', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
                   const SizedBox(height: 4),
-                  Text('Where you spent your study sessions during this $_selectedTimeframe.', style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)),
+                  Text('Where you spent your study sessions during this $_selectedTimeframe.', style: const TextStyle(fontSize: 12, color: Colors.white54, fontStyle: FontStyle.italic)),
                   const SizedBox(height: 16),
                   if (sortedLocations.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 24.0),
-                      child: Center(child: Text('No session location data recorded for this timeframe.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                      child: Center(child: Text('No session data recorded.', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic))),
                     )
                   else
                     ...sortedLocations.map((entry) {
@@ -897,7 +905,7 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                       final duration = entry.value;
                       final percentage = currentTotalMins > 0 ? (duration / currentTotalMins) : 0.0;
                       
-                      final List<Color> palette = [const Color(0xff5732a3), Colors.blueAccent, Colors.teal, Colors.orangeAccent];
+                      final List<Color> palette = [Colors.blueAccent, Colors.tealAccent, Colors.orangeAccent, Colors.purpleAccent];
                       final barColor = palette[index % palette.length];
                       
                       return Padding(
@@ -906,38 +914,38 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
-  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  children: [
-    Expanded(
-      child: Row(
-        children: [
-          Icon(Icons.location_on_rounded, size: 16, color: barColor),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              locationName, 
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ),
-        ],
-      ),
-    ),
-    const SizedBox(width: 8), 
-    Text(
-      '${(percentage * 100).toStringAsFixed(0)}% (${duration}m)', 
-      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[800], fontSize: 13),
-    ),
-  ],
-),
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.location_on_rounded, size: 16, color: barColor),
+                                      const SizedBox(width: 6),
+                                      Flexible(
+                                        child: Text(
+                                          locationName, 
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8), 
+                                Text(
+                                  '${(percentage * 100).toStringAsFixed(0)}% (${duration}m)', 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 13),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 6),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
                                 value: percentage,
                                 minHeight: 8,
-                                backgroundColor: Colors.grey[100],
+                                backgroundColor: Colors.white12,
                                 valueColor: AlwaysStoppedAnimation<Color>(barColor),
                               ),
                             ),
@@ -967,28 +975,28 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     final bool isPositive = percentChange >= 0;
     final bool isGoodChange = (isPositive && isIncreasePositive) || (!isPositive && !isIncreasePositive);
     
-    Color badgeColor = Colors.grey;
+    Color badgeColor = Colors.white54;
     IconData arrowIcon = Icons.trending_flat_rounded;
     
     if (!isNoPriorData) {
-      badgeColor = isGoodChange ? Colors.green : Colors.redAccent;
+      badgeColor = isGoodChange ? Colors.greenAccent : Colors.redAccent;
       arrowIcon = isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded;
     }
 
     return Card(
-      color: Colors.white,
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.white.withOpacity(0.1),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white12)),
       child: Padding(
         padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: const Color(0xff5732a3), size: 22),
+            Icon(icon, color: Colors.white70, size: 22),
             const SizedBox(height: 10),
-            Text(title, style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+            Text(title, style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black)),
+            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -997,13 +1005,13 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
                   const SizedBox(width: 2),
                   Text('${percentChange.abs().toStringAsFixed(1)}%', style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 12)),
                 ] else
-                  const Text('N/A', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                  const Text('N/A', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 12)),
                 const SizedBox(width: 4),
-                const Text('vs prior', style: TextStyle(color: Colors.grey, fontSize: 10)),
+                const Text('vs prior', style: TextStyle(color: Colors.white54, fontSize: 10)),
               ],
             ),
             const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(color: Colors.black38, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(subtitle, style: const TextStyle(color: Colors.white30, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         ),
       ),
@@ -1015,10 +1023,11 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
     final userEmail = _supabase.auth.currentUser?.email ?? 'User Account';
     
     return Scaffold(
-      backgroundColor: const Color(0xfff8f9fa),
+      backgroundColor: Colors.transparent, // FIX: Transparent for full background
+      extendBodyBehindAppBar: true,      // FIX: Extend into app bar area
       appBar: AppBar(
         title: const Text('My Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xff5732a3),
+        backgroundColor: Colors.transparent, // FIX: Transparent app bar
         elevation: 0,
         actions: [
           IconButton(
@@ -1028,16 +1037,17 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold)),
-                  content: const Text('Are you sure you want to log out of LockedIn?'),
+                  backgroundColor: const Color(0xff1e1e24),
+                  title: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                  content: const Text('Are you sure you want to log out of LockedIn?', style: TextStyle(color: Colors.white70)),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
                     TextButton(
                       onPressed: () {
                         Navigator.pop(context);
                         _handleSignOut();
                       },
-                      child: const Text('Log Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                      child: const Text('Log Out', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -1046,203 +1056,217 @@ class ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderS
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xff5732a3)))
-          : Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  color: const Color(0xff5732a3),
-                  padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
-                  child: Column(
-                    children: [
-                      Stack(
-                        alignment: Alignment.bottomRight,
+      body: Container( // FIX: Universal Background Wrapper applied
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: const AssetImage('assets/LockedIN_coverpage.jpeg'),
+            fit: BoxFit.cover,
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.65), 
+              BlendMode.darken,
+            ),
+          ),
+        ),
+        child: SafeArea(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              : Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.only(bottom: 16, left: 24, right: 24),
+                      child: Column(
                         children: [
-                          CircleAvatar(
-                            radius: 36,
-                            backgroundColor: Colors.white,
-                            backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
-                            child: _avatarUrl == null ? const Icon(Icons.person, size: 40, color: Color(0xff5732a3)) : null,
-                          ),
-                          if (_isUploading)
-                            Positioned.fill(
-                              child: Container(
-                                decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                                child: const Center(
-                                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                          Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              CircleAvatar(
+                                radius: 36,
+                                backgroundColor: Colors.white.withOpacity(0.2),
+                                backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+                                child: _avatarUrl == null ? const Icon(Icons.person, size: 40, color: Colors.white70) : null,
+                              ),
+                              if (_isUploading)
+                                Positioned.fill(
+                                  child: Container(
+                                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                    child: const Center(
+                                      child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                                    ),
+                                  ),
+                                ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: GestureDetector(
+                                  onTap: _isUploading ? null : () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      backgroundColor: const Color(0xff1e1e24),
+                                      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                                      builder: (context) => SafeArea(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            ListTile(
+                                              leading: const Icon(Icons.photo_library, color: Colors.white),
+                                              title: const Text('Upload New Photo', style: TextStyle(color: Colors.white)),
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                _pickAndUploadImage();
+                                              },
+                                            ),
+                                            if (_avatarUrl != null)
+                                              ListTile(
+                                                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                                title: const Text('Remove Current Photo', style: TextStyle(color: Colors.redAccent)),
+                                                onTap: () {
+                                                  Navigator.pop(context);
+                                                  _deleteProfilePicture();
+                                                },
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: const CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: Colors.white,
+                                    child: Icon(Icons.camera_alt, size: 12, color: Colors.black),
+                                  ),
                                 ),
                               ),
-                            ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: GestureDetector(
-                              onTap: _isUploading ? null : () {
-                                showModalBottomSheet(
-                                  context: context,
-                                  backgroundColor: Colors.white,
-                                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-                                  builder: (context) => SafeArea(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  '@$_username',
+                                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  userEmail,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              GestureDetector(
+                                onTap: () => _showSocialListModal('Followers', _followersUsernames),
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white24)),
+                                    child: Row(
                                       children: [
-                                        ListTile(
-                                          leading: const Icon(Icons.photo_library, color: Color(0xff5732a3)),
-                                          title: const Text('Upload New Photo'),
-                                          onTap: () {
-                                            Navigator.pop(context);
-                                            _pickAndUploadImage();
-                                          },
-                                        ),
-                                        if (_avatarUrl != null)
-                                          ListTile(
-                                            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                                            title: const Text('Remove Current Photo', style: TextStyle(color: Colors.redAccent)),
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _deleteProfilePicture();
-                                            },
-                                          ),
+                                        Text('${_followersUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                        const Text(' Followers', style: TextStyle(color: Colors.white, fontSize: 13)),
                                       ],
                                     ),
                                   ),
-                                );
-                              },
-                              child: const CircleAvatar(
-                                radius: 12,
-                                backgroundColor: Colors.white,
-                                child: Icon(Icons.camera_alt, size: 12, color: Color(0xff5732a3)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '@$_username',
-                              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              userEmail,
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          GestureDetector(
-                            onTap: () => _showSocialListModal('Followers', _followersUsernames),
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(16)),
-                                child: Row(
-                                  children: [
-                                    Text('${_followersUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                    const Text(' Followers', style: TextStyle(color: Colors.white, fontSize: 13)),
-                                  ],
                                 ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          GestureDetector(
-                            onTap: () => _showSocialListModal('Following', _followingUsernames),
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(16)),
-                                child: Row(
-                                  children: [
-                                    Text('${_followingUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                    const Text(' Following', style: TextStyle(color: Colors.white, fontSize: 13)),
-                                  ],
+                              const SizedBox(width: 12),
+                              GestureDetector(
+                                onTap: () => _showSocialListModal('Following', _followingUsernames),
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white24)),
+                                    child: Row(
+                                      children: [
+                                        Text('${_followingUsernames.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                        const Text(' Following', style: TextStyle(color: Colors.white, fontSize: 13)),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      _buildTierProgressCard(),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          Column(
-                            children: [
-                              Text('$_totalXp', style: const TextStyle(color: Colors.greenAccent, fontSize: 22, fontWeight: FontWeight.bold)),
-                              const Text('TOTAL XP', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
                             ],
                           ),
-                          Container(width: 1, height: 24, color: Colors.white24),
-                          Column(
+                          _buildTierProgressCard(),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              Row(
+                              Column(
                                 children: [
-                                  const Icon(Icons.local_fire_department, color: Colors.orangeAccent, size: 20),
-                                  Text('$_currentStreak', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                                  Text('$_totalXp', style: const TextStyle(color: Colors.greenAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+                                  const Text('TOTAL XP', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
                                 ],
                               ),
-                              const Text('DAY STREAK', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                              Container(width: 1, height: 24, color: Colors.white24),
+                              Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.local_fire_department, color: Colors.orangeAccent, size: 20),
+                                      Text('$_currentStreak', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  const Text('DAY STREAK', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
                             ],
-                          ),
+                          )
                         ],
-                      )
-                    ],
-                  ),
+                      ),
+                    ),
+                    Container(
+                      color: Colors.black.withOpacity(0.3), // FIX: Translucent tab bar
+                      child: TabBar(
+                        controller: _subTabController,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: Colors.white54,
+                        indicatorColor: Colors.white,
+                        indicatorWeight: 3,
+                        tabs: const [
+                          Tab(icon: Icon(Icons.calendar_month), text: "Calendar"),
+                          Tab(icon: Icon(Icons.bar_chart_rounded), text: "Analytics"),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _subTabController,
+                        children: [
+                          _buildCalendarViewTab(),
+                          _buildAnalyticsViewTab(),
+                        ],
+                      ),
+                    )
+                  ],
                 ),
-                Container(
-                  color: Colors.white,
-                  child: TabBar(
-                    controller: _subTabController,
-                    labelColor: const Color(0xff5732a3),
-                    unselectedLabelColor: Colors.grey,
-                    indicatorColor: const Color(0xff5732a3),
-                    indicatorWeight: 3,
-                    tabs: const [
-                      Tab(icon: Icon(Icons.calendar_month), text: "Calendar"),
-                      Tab(icon: Icon(Icons.bar_chart_rounded), text: "Analytics"),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: TabBarView(
-                    controller: _subTabController,
-                    children: [
-                      _buildCalendarViewTab(),
-                      _buildAnalyticsViewTab(),
-                    ],
-                  ),
-                )
-              ],
-            ),
+        ),
+      ),
     );
   }
 }
 
 class GamificationEngine {
-
   static int getLevel(int totalXp) {
     if (totalXp < 2500) return (totalXp / 500).floor() + 1;
     if (totalXp < 12500) return ((totalXp - 2500) / 1000).floor() + 6;
@@ -1267,8 +1291,8 @@ class GamificationEngine {
   static Map<String, dynamic> getTierDetails(int level) {
     if (level <= 5) return {'name': 'Novice Spark', 'color': Colors.grey, 'icon': Icons.child_care};
     if (level <= 15) return {'name': 'Deep Focuser', 'color': Colors.blueAccent, 'icon': Icons.trending_up};
-    if (level <= 30) return {'name': 'Flow Master', 'color': Colors.teal, 'icon': Icons.bolt};
-    if (level <= 50) return {'name': 'Productivity Titan', 'color': Colors.orange, 'icon': Icons.emoji_events};
-    return {'name': 'LockedIn Legend', 'color': Colors.amber, 'icon': Icons.diamond};
+    if (level <= 30) return {'name': 'Flow Master', 'color': Colors.tealAccent, 'icon': Icons.bolt};
+    if (level <= 50) return {'name': 'Productivity Titan', 'color': Colors.orangeAccent, 'icon': Icons.emoji_events};
+    return {'name': 'LockedIn Legend', 'color': Colors.amberAccent, 'icon': Icons.diamond};
   }
 }
